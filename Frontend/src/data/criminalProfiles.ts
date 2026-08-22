@@ -1,0 +1,66 @@
+import { CriminalProfile } from '../types';
+
+export const criminalProfiles: CriminalProfile[] = [
+  {
+    id: 'CRN-0021', name: 'Mohammad Farooq', alias: ['Farooq Bhai', 'The Shadow'],
+    age: 44, gender: 'MALE', nationality: 'Unknown', region: 'North Sector',
+    threatLevel: 'EXTREME', status: 'WANTED',
+    lastKnownLocation: 'BOP North – KM 12', lastSeen: '2026-08-22T21:08:22',
+    associatedCases: ['CS-1901', 'CS-1952', 'CS-2010'],
+    associatedVehicles: ['VEH-492'], identificationStatus: 'IDENTIFIED',
+    category: 'Cross-Border Infiltration', description: 'Known facilitator of cross-border infiltration. Believed to coordinate smuggling and reconnaissance operations.',
+    assignedOfficer: 'Insp. Vikram Singh', connections: ['CRN-0034', 'CRN-0045'],
+  },
+  {
+    id: 'CRN-0034', name: 'Rauf Malik', alias: ['The Courier'],
+    age: 32, gender: 'MALE', nationality: 'Unknown', region: 'East Sector',
+    threatLevel: 'HIGH', status: 'MONITORING',
+    lastKnownLocation: 'East Checkpoint Vicinity', lastSeen: '2026-08-22T20:15:07',
+    associatedCases: ['CS-1982', 'CS-2031'],
+    associatedVehicles: ['VEH-501'], identificationStatus: 'IDENTIFIED',
+    category: 'Intelligence Asset / Suspect', description: 'Suspected courier for cross-border communication network. Under active surveillance.',
+    assignedOfficer: 'Insp. Priya Mehta', connections: ['CRN-0021'],
+  },
+  {
+    id: 'CRN-0045', name: 'Unnamed Subject A', alias: ['Ghost'],
+    age: 28, gender: 'MALE', nationality: 'Unknown', region: 'North Sector',
+    threatLevel: 'HIGH', status: 'WANTED',
+    lastKnownLocation: 'BOP North – Main Gate', lastSeen: '2026-08-22T21:12:05',
+    associatedCases: ['CS-2041'],
+    associatedVehicles: [], identificationStatus: 'PARTIAL',
+    category: 'Active Infiltrator', description: 'Unidentified individual detected during border intrusion at BOP North. Face match partial (67%). Currently being tracked.',
+    assignedOfficer: 'Insp. Amit Tomar', connections: ['CRN-0021'],
+  },
+  {
+    id: 'CRN-0012', name: 'Tariq Ahmed', alias: ['Tarik', 'Khan'],
+    age: 51, gender: 'MALE', nationality: 'Unknown', region: 'West Sector',
+    threatLevel: 'EXTREME', status: 'WANTED',
+    lastKnownLocation: 'West Sector – Bunker Zone', lastSeen: '2026-08-15T16:30:00',
+    associatedCases: ['CS-1832', 'CS-1901', 'CS-1955'],
+    associatedVehicles: [], identificationStatus: 'IDENTIFIED',
+    category: 'Senior Operative', description: 'Senior operative suspected of planning cross-border activities. Has evaded capture on three occasions. Considered armed and dangerous.',
+    assignedOfficer: 'SI Rahul Kapoor', connections: ['CRN-0021', 'CRN-0056'],
+  },
+  {
+    id: 'CRN-0056', name: 'Aamir Hussain', alias: ['Hussain Sahib'],
+    age: 38, gender: 'MALE', nationality: 'Unknown', region: 'South Sector',
+    threatLevel: 'MEDIUM', status: 'MONITORING',
+    lastKnownLocation: 'South Sector – OP Delta', lastSeen: '2026-08-20T10:00:00',
+    associatedCases: ['CS-1955', 'CS-2021'],
+    associatedVehicles: ['VEH-499'], identificationStatus: 'IDENTIFIED',
+    category: 'Financial Operative', description: 'Suspected of facilitating financial transactions for cross-border network. Under surveillance.',
+    assignedOfficer: 'SI Rahul Kapoor', connections: ['CRN-0012'],
+  },
+  {
+    id: 'CRN-0067', name: 'Unknown Subject B', alias: [],
+    age: 25, gender: 'UNKNOWN', nationality: 'Unknown', region: 'Central Sector',
+    threatLevel: 'LOW', status: 'MONITORING',
+    lastKnownLocation: 'Central Gate', lastSeen: '2026-08-21T14:20:00',
+    associatedCases: ['CS-2035'],
+    associatedVehicles: [], identificationStatus: 'UNIDENTIFIED',
+    category: 'Unknown', description: 'Unidentified individual repeatedly photographed near Central Gate checkpoint over 5 days. Nature of activity unclear.',
+    assignedOfficer: 'Insp. Priya Mehta', connections: [],
+  },
+];
+
+export const getCriminalById = (id: string) => criminalProfiles.find(c => c.id === id);
