@@ -1,45 +1,46 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg-base: #080c14;
-  --color-bg-surface: #0f1623;
-  --color-bg-elevated: #161d2e;
-  --color-bg-card: #1a2236;
-  --color-bg-hover: #1e2940;
+  /* Indian Army Tactical Theme */
+  --color-bg-base: #090e09; /* Deep Olive Drab */
+  --color-bg-surface: #101610; 
+  --color-bg-elevated: #182218;
+  --color-bg-card: #141c14;
+  --color-bg-hover: #1d2b1d;
 
-  --color-border: #1e2d45;
-  --color-border-light: #243552;
+  --color-border: #243324;
+  --color-border-light: #324732;
 
-  --color-primary: #3b82f6;
-  --color-primary-dark: #2563eb;
-  --color-primary-light: #60a5fa;
+  --color-primary: #C3B091; /* Tactical Khaki / Desert */
+  --color-primary-dark: #A89574;
+  --color-primary-light: #DCD0B6;
 
-  --color-success: #10b981;
-  --color-success-dark: #059669;
-  --color-success-bg: #052e16;
+  --color-success: #138808; /* Indian Flag Green */
+  --color-success-dark: #0f6c06;
+  --color-success-bg: #031c01;
 
-  --color-warning: #f59e0b;
-  --color-warning-dark: #d97706;
-  --color-warning-bg: #1c1400;
+  --color-warning: #FF9933; /* Indian Flag Saffron */
+  --color-warning-dark: #cc7a29;
+  --color-warning-bg: #331f0a;
 
-  --color-danger: #ef4444;
+  --color-danger: #ef4444; /* Standard Tactical Red */
   --color-danger-dark: #dc2626;
   --color-danger-bg: #2d0707;
 
   --color-critical: #ff2020;
   --color-critical-bg: #3d0000;
 
-  --color-info: #06b6d4;
-  --color-info-bg: #001a1f;
+  --color-info: #64748b;
+  --color-info-bg: #0f172a;
 
-  --color-text-primary: #f1f5f9;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
-  --color-text-disabled: #475569;
+  --color-text-primary: #e2e8f0;
+  --color-text-secondary: #9da39b; /* Slightly greenish grey */
+  --color-text-muted: #6b7569;
+  --color-text-disabled: #4a5448;
 
-  --color-accent-cyan: #22d3ee;
-  --color-accent-purple: #a78bfa;
-  --color-accent-orange: #fb923c;
+  --color-accent-cyan: #FF9933; /* Saffron Accent */
+  --color-accent-purple: #C3B091; /* Khaki Accent */
+  --color-accent-orange: #FF9933;
 
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;

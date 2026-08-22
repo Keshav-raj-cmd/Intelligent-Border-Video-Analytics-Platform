@@ -4,11 +4,20 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 from huggingface_hub import hf_hub_download
 from supervision import Detections
 
 app = FastAPI(title="Thermal Human Detection API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # PyTorch security rules fix (Monkey-patch torch.load for PyTorch 2.6+)
 _original_torch_load = torch.load
