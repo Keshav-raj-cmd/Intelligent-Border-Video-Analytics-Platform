@@ -10,6 +10,10 @@ interface AppState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
 
+  // Authentication
+  isAuthenticated: boolean;
+  setAuthenticated: (val: boolean) => void;
+
   // AI Assistant
   aiDrawerOpen: boolean;
   aiMessages: AIMessage[];
@@ -44,6 +48,12 @@ let msgCounter = 100;
 export const useAppStore = create<AppState>((set, get) => ({
   sidebarCollapsed: false,
   toggleSidebar: () => set(s => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+
+  isAuthenticated: localStorage.getItem('auth_token') !== null,
+  setAuthenticated: (val: boolean) => {
+    if (!val) localStorage.removeItem('auth_token');
+    set({ isAuthenticated: val });
+  },
 
   aiDrawerOpen: false,
   aiMessages: [...initialMessages],

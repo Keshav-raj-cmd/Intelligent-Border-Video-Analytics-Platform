@@ -1,7 +1,9 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { useAppStore } from './store/appStore';
 import AppShell from './components/layout/AppShell';
 
 // Pages
+import Login from './pages/auth/Login';
 import CommandDashboard from './pages/command/CommandDashboard';
 import LiveSurveillance from './pages/surveillance/LiveSurveillance';
 import HumanFaceDetection from './pages/surveillance/HumanFaceDetection';
@@ -27,6 +29,12 @@ import SystemStatus from './pages/management/SystemStatus';
 import Settings from './pages/management/Settings';
 
 function App() {
+  const isAuthenticated = useAppStore(state => state.isAuthenticated);
+
+  if (!isAuthenticated) {
+    return <Login />;
+  }
+
   return (
     <BrowserRouter>
       <Routes>

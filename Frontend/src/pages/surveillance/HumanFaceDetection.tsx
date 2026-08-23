@@ -1,201 +1,397 @@
-import React, { useState, useEffect } from 'react';
-import { User, Eye, MapPin, Clock, Shield, Activity } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { User, Eye, UserPlus, Database, ShieldAlert, Camera, Wifi, VideoOff } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
-import { detections } from '../../data/detections';
-import { SeverityBadge, StatusBadge, SearchBar, FilterButton, PageHeader, StatCard } from '../../components/common';
-
-const FaceBox: React.FC<{ confidence: number; identified?: boolean }> = ({ confidence, identified }) => (
-  <div className="relative camera-feed rounded-lg overflow-hidden" style={{ height: '140px' }}>
-    <div className="scan-line" />
-    {/* Face bounding box */}
-    <div className="absolute" style={{ left: '30%', top: '15%', width: '40%', height: '60%' }}>
-      {/* Corner brackets */}
-      {[
-        { top: -2, left: -2, borderTop: '2px solid', borderLeft: '2px solid', width: 10, height: 10 },
-        { top: -2, right: -2, borderTop: '2px solid', borderRight: '2px solid', width: 10, height: 10 },
-        { bottom: -2, left: -2, borderBottom: '2px solid', borderLeft: '2px solid', width: 10, height: 10 },
-        { bottom: -2, right: -2, borderBottom: '2px solid', borderRight: '2px solid', width: 10, height: 10 },
-      ].map((style, i) => (
-        <div key={i} className="absolute" style={{
-          ...style,
-          borderColor: identified ? '#10b981' : '#3b82f6',
-        }} />
-      ))}
-      <div className="absolute -top-6 left-0 text-xs px-1 rounded" style={{
-        background: identified ? 'rgba(16,185,129,0.85)' : 'rgba(59,130,246,0.85)',
-        color: '#fff', fontSize: '9px', whiteSpace: 'nowrap',
-      }}>
-        {identified ? 'IDENTIFIED' : 'FACE DETECTED'} {confidence}%
-      </div>
-      {/* Simulated face */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="w-10 h-10 rounded-full" style={{ background: 'rgba(100,120,140,0.3)', border: '1px solid rgba(100,120,140,0.2)' }}>
-          <div className="w-full h-full flex items-center justify-center">
-            <User size={20} style={{ color: 'rgba(148,163,184,0.5)' }} />
-          </div>
-        </div>
-      </div>
-    </div>
-    {/* Confidence bar */}
-    <div className="absolute bottom-2 left-2 right-2">
-      <div className="flex justify-between text-xs mb-0.5" style={{ fontSize: '8px', color: '#64748b' }}>
-        <span>Confidence</span><span>{confidence}%</span>
-      </div>
-      <div style={{ height: '2px', background: 'rgba(100,116,139,0.3)', borderRadius: '1px' }}>
-        <div style={{ width: `${confidence}%`, height: '100%', background: identified ? '#10b981' : '#3b82f6', borderRadius: '1px' }} />
-      </div>
-    </div>
-  </div>
-);
-
-const MotionPanel: React.FC = () => {
-  const metrics = [
-    { label: 'Motion Level', value: 72, color: '#f59e0b' },
-    { label: 'Face Visibility', value: 84, color: '#3b82f6' },
-    { label: 'Frame Quality', value: 91, color: '#10b981' },
-    { label: 'Detection Confidence', value: 87, color: '#3b82f6' },
-    { label: 'Tracking Stability', value: 65, color: '#a78bfa' },
-  ];
-  return (
-    <div className="card p-4">
-      <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
-        Fast Movement Detection
-      </h3>
-      <div className="space-y-3">
-        {metrics.map(m => (
-          <div key={m.label}>
-            <div className="flex justify-between text-xs mb-1">
-              <span style={{ color: 'var(--color-text-secondary)' }}>{m.label}</span>
-              <span className="font-medium" style={{ color: m.color }}>{m.value}%</span>
-            </div>
-            <div style={{ height: '4px', background: 'var(--color-border)', borderRadius: '2px' }}>
-              <div style={{ width: `${m.value}%`, height: '100%', background: m.color, borderRadius: '2px', transition: 'width 0.5s ease' }} />
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 p-2 rounded text-xs" style={{ background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.15)', color: 'var(--color-text-muted)' }}>
-        Active frame analysis at 30fps. Motion blur compensation enabled.
-      </div>
-    </div>
-  );
-};
+import { PageHeader, StatCard } from '../../components/common';
 
 const HumanFaceDetection: React.FC = () => {
   const { setCurrentPage } = useAppStore();
-  const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState('ALL');
-  const [selected, setSelected] = useState(detections[0]);
+  const [isLive, setIsLive] = useState(false);
+  const [activeDetections, setActiveDetections] = useState<any[]>([]);
+  const [cameraMode, setCameraMode] = useState<'webcam' | 'ipcam' | null>(null);
+  const [ipCamFrameBase64, setIpCamFrameBase64] = useState<string | null>(null);
+  const [frameSize, setFrameSize] = useState({ width: 640, height: 480 });
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isProcessingFrame = useRef(false);
 
   useEffect(() => { setCurrentPage('human-face-detection'); }, [setCurrentPage]);
 
-  const filtered = detections.filter(d => {
-    const matchSearch = d.camera.toLowerCase().includes(search.toLowerCase());
-    const matchType = typeFilter === 'ALL' || d.trackingStatus === typeFilter;
-    return matchSearch && matchType;
-  });
+  const startWebcam = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+        setIsLive(true);
+        setCameraMode('webcam');
+      }
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      alert("Could not access camera. Please check permissions.");
+    }
+  };
+
+  const startIpCam = async () => {
+    const url = prompt("Enter IP Camera URL (e.g., http://192.168.1.117:8080/video):", "http://192.168.1.117:8080/video");
+    if (!url) return;
+
+    try {
+      const res = await fetch('http://localhost:8000/api/face/ipcam/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      if (res.ok) {
+        setIsLive(true);
+        setCameraMode('ipcam');
+      } else {
+        alert("Failed to start IP Camera.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error connecting to backend.");
+    }
+  };
+
+  const stopFeed = async () => {
+    if (cameraMode === 'ipcam') {
+      try {
+        await fetch('http://localhost:8000/api/face/ipcam/stop', { method: 'POST' });
+      } catch (e) { console.error(e); }
+    } else {
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null;
+      }
+    }
+    setIsLive(false);
+    setCameraMode(null);
+    setActiveDetections([]);
+    setIpCamFrameBase64(null);
+  };
+
+  const captureAndDetect = async () => {
+    if (!videoRef.current || !canvasRef.current || isProcessingFrame.current) return;
+    isProcessingFrame.current = true;
+    const canvas = canvasRef.current;
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx?.drawImage(videoRef.current, 0, 0);
+    
+    canvas.toBlob(async (blob) => {
+      if (!blob) { isProcessingFrame.current = false; return; }
+      const formData = new FormData();
+      formData.append('file', blob, 'frame.jpg');
+      try {
+        const res = await fetch('http://localhost:8000/api/face/recognize', { method: 'POST', body: formData });
+        if (res.ok) {
+          const data = await res.json();
+          setActiveDetections(data.detections || []);
+          if (data.frame_width && data.frame_height) {
+            setFrameSize({ width: data.frame_width, height: data.frame_height });
+          }
+        }
+      } catch (error) {
+        console.error("Recognition error:", error);
+      } finally {
+        isProcessingFrame.current = false;
+      }
+    }, 'image/jpeg', 0.6);
+  };
+
+  const pollIpCam = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/face/ipcam/poll');
+      if (res.ok) {
+        const data = await res.json();
+        setActiveDetections(data.detections || []);
+        if (data.frame_width && data.frame_height) {
+          setFrameSize({ width: data.frame_width, height: data.frame_height });
+        }
+        if (data.frame_base64) {
+          setIpCamFrameBase64(data.frame_base64);
+        }
+      }
+    } catch (error) {
+      console.error("IP Cam Poll error:", error);
+    }
+  };
+
+  useEffect(() => {
+    let interval: any;
+    if (isLive) {
+      if (cameraMode === 'webcam') {
+        interval = setInterval(captureAndDetect, 150);
+      } else if (cameraMode === 'ipcam') {
+        interval = setInterval(pollIpCam, 150);
+      }
+    }
+    return () => clearInterval(interval);
+  }, [isLive, cameraMode]);
+
+  // Registration Modal State
+  const [regName, setRegName] = useState('');
+  const [regInfo, setRegInfo] = useState('');
+  const [regFile, setRegFile] = useState<File | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const captureVideoRef = useRef<HTMLVideoElement>(null);
+
+  const stopCapture = () => {
+    setIsCapturing(false);
+    if (captureVideoRef.current && captureVideoRef.current.srcObject) {
+      const stream = captureVideoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      captureVideoRef.current.srcObject = null;
+    }
+  };
+
+  const startCapture = async () => {
+    setIsCapturing(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (captureVideoRef.current) {
+        captureVideoRef.current.srcObject = stream;
+        captureVideoRef.current.play();
+      }
+    } catch (err) {
+      alert("Could not access webcam for capture.");
+      setIsCapturing(false);
+    }
+  };
+
+  const takeSnapshot = () => {
+    if (captureVideoRef.current) {
+      const video = captureVideoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const file = new File([blob], "snapshot.jpg", { type: "image/jpeg" });
+            setRegFile(file);
+            stopCapture();
+          }
+        }, 'image/jpeg', 0.9);
+      }
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regFile) return alert("Please select a photo");
+    setIsSubmitting(true);
+    const formData = new FormData();
+    formData.append('subject_name', regName);
+    formData.append('info_json', JSON.stringify({ notes: regInfo }));
+    formData.append('file', regFile);
+    try {
+      const res = await fetch('http://localhost:8000/api/face/register', { method: 'POST', body: formData });
+      if (res.ok) {
+        alert(`Successfully registered face for ${regName}`);
+        setShowRegisterModal(false);
+        setRegName(''); setRegInfo(''); setRegFile(null);
+      } else {
+        const err = await res.json();
+        alert(`Error: ${err.error}`);
+      }
+    } catch(err) {
+      alert(`Network Error: ${err}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   return (
-    <div className="flex flex-col h-full" style={{ height: 'calc(100vh - 56px)' }}>
+    <div className="flex flex-col h-full overflow-y-auto" style={{ height: 'calc(100vh - 56px)' }}>
       <PageHeader title="Human & Face Detection"
-        subtitle={`${detections.length} detections today`}
+        subtitle="100% Local AI Face Recognition (YuNet & SFace) + SQLite Sync"
         icon={<User size={16} />}
-        actions={<SearchBar value={search} onChange={setSearch} placeholder="Search..." className="w-48" />}
+        actions={
+          <div className="flex gap-2">
+            {!isLive ? (
+              <>
+                <button onClick={startWebcam} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-2">
+                  <Camera size={14} /> WEBCAM FEED
+                </button>
+                <button onClick={startIpCam} className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded flex items-center gap-2">
+                  <Wifi size={14} /> IP CAM FEED
+                </button>
+              </>
+            ) : (
+              <button onClick={stopFeed} className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded flex items-center gap-2">
+                <VideoOff size={14} /> STOP FEED
+              </button>
+            )}
+            <button onClick={() => setShowRegisterModal(true)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold border border-border rounded flex items-center gap-2">
+              <UserPlus size={14} /> REGISTER FACE
+            </button>
+          </div>
+        }
       />
 
-      {/* Stats */}
       <div className="grid grid-cols-4 gap-3 px-4 py-3 shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        <StatCard icon={<User size={16} />} label="Humans Detected" value={62} sub="Today" accent="var(--color-primary)" />
-        <StatCard icon={<Eye size={16} />} label="Face Detected" value={18} sub="High confidence" accent="var(--color-success)" />
-        <StatCard icon={<Shield size={16} />} label="Identified" value={2} sub="Criminal DB match" accent="var(--color-danger)" />
-        <StatCard icon={<Activity size={16} />} label="Tracking" value={3} sub="Active targets" accent="var(--color-warning)" />
+        <StatCard icon={<Eye size={16} />} label="Active Feeds" value={isLive ? 1 : 0} sub={cameraMode || "None"} accent="var(--color-primary)" />
+        <StatCard icon={<User size={16} />} label="Faces In Frame" value={activeDetections.length} sub="Live Count" accent="var(--color-success)" />
+        <StatCard icon={<Database size={16} />} label="DB Sync" value="ACTIVE" sub="SQLite Connected" accent="var(--color-warning)" />
+        <StatCard icon={<ShieldAlert size={16} />} label="Matches" value={activeDetections.filter(d => d.database_info).length} sub="Database Hits" accent="var(--color-danger)" />
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-2 px-4 py-2 shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        {['ALL', 'TRACKING', 'IDENTIFIED', 'LOST', 'UNKNOWN'].map(f => (
-          <FilterButton key={f} label={f} active={typeFilter === f} onClick={() => setTypeFilter(f)} />
-        ))}
-      </div>
-
-      <div className="flex flex-1 overflow-hidden">
-        {/* Detection list */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {filtered.map(det => (
-            <div key={det.id}
-              onClick={() => setSelected(det)}
-              className="card p-4 cursor-pointer transition-all"
-              style={{ border: selected?.id === det.id ? '1px solid var(--color-primary)' : '1px solid var(--color-border)' }}>
-              <div className="flex gap-4">
-                <div className="shrink-0 w-36">
-                  <FaceBox confidence={det.confidence} identified={det.trackingStatus === 'IDENTIFIED'} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>{det.id}</span>
-                    <StatusBadge status={det.trackingStatus} size="sm" />
-                    {det.faceDetected && <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(16,185,129,0.12)', color: '#10b981' }}>FACE</span>}
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                    {[
-                      { label: 'Camera', value: det.camera },
-                      { label: 'Location', value: det.location },
-                      { label: 'Sector', value: det.sector },
-                      { label: 'Confidence', value: `${det.confidence}%` },
-                      { label: 'Detected', value: new Date(det.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) },
-                      { label: 'Person ID', value: det.personId || 'Unknown' },
-                    ].map(item => (
-                      <div key={item.label} className="text-xs">
-                        <span style={{ color: 'var(--color-text-muted)' }}>{item.label}: </span>
-                        <span style={{ color: 'var(--color-text-secondary)' }}>{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {det.attributes && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {Object.entries(det.attributes).map(([k, v]) => (
-                        <span key={k} className="text-xs px-2 py-0.5 rounded"
-                          style={{ background: 'var(--color-bg-elevated)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
-                          {k}: {v}
-                        </span>
-                      ))}
+      <div className="flex flex-1 flex-col xl:flex-row overflow-hidden min-h-[600px]">
+        <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
+          <div className="card overflow-hidden flex flex-col w-full max-w-5xl mx-auto border-2 relative" style={{ borderColor: 'var(--color-border)', height: '500px' }}>
+            {!isLive && (
+                <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: 'rgba(0,0,0,0.7)' }}>
+                    <div className="text-center">
+                        <Eye size={48} className="mx-auto mb-4" style={{ color: 'var(--color-text-muted)' }} />
+                        <h2 className="text-xl font-bold" style={{ color: 'var(--color-text-secondary)' }}>CAMERA OFFLINE</h2>
+                        <p className="text-sm mt-2" style={{ color: 'var(--color-text-muted)' }}>Select a feed source to initialize Local AI inference</p>
                     </div>
-                  )}
                 </div>
-              </div>
-            </div>
-          ))}
+            )}
+            
+            {cameraMode === 'ipcam' && ipCamFrameBase64 && (
+                <img src={`data:image/jpeg;base64,${ipCamFrameBase64}`} className="w-full h-full object-contain bg-black" alt="IP Cam" />
+            )}
+            <video 
+                ref={videoRef}
+                className={`w-full h-full object-contain bg-black ${cameraMode === 'ipcam' ? 'hidden' : ''}`}
+                playsInline
+                muted
+            />
+            <canvas ref={canvasRef} className="hidden" />
+            
+            {/* SVG OVERLAY FOR BOXES */}
+            {isLive && (() => {
+                return (
+                  <svg 
+                    viewBox={`0 0 ${frameSize.width} ${frameSize.height}`}
+                    className="absolute inset-0 w-full h-full"
+                    preserveAspectRatio="xMidYMid meet"
+                  >
+                    {activeDetections.map((det, idx) => {
+                      const isMatch = !!det.database_info;
+                      const boxColor = isMatch ? '#ef4444' : '#FF9933'; // Red for match, orange for unknown
+                      const fillColor = isMatch ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 153, 51, 0.2)';
+                      
+                      return (
+                        <g key={idx}>
+                          <rect 
+                            x={det.xmin} y={det.ymin} 
+                            width={det.xmax - det.xmin} height={det.ymax - det.ymin} 
+                            fill={fillColor} stroke={boxColor} strokeWidth="2"
+                          />
+                          <rect 
+                            x={det.xmin} y={det.ymin - 16} 
+                            width={det.xmax - det.xmin} height="16" 
+                            fill={boxColor}
+                          />
+                          <text 
+                            x={det.xmin + 2} y={det.ymin - 4} 
+                            fill="#000" fontSize="10" fontWeight="bold" fontFamily="monospace"
+                          >
+                            {det.class.toUpperCase()} {(det.confidence * 100).toFixed(0)}%
+                          </text>
+                        </g>
+                      )
+                    })}
+                  </svg>
+                );
+            })()}
+          </div>
         </div>
 
-        {/* Right panel */}
-        <div className="hidden xl:flex flex-col w-72 shrink-0 overflow-y-auto p-4 gap-4"
-          style={{ borderLeft: '1px solid var(--color-border)', background: 'var(--color-bg-surface)' }}>
-          {selected && (
-            <div className="card p-4">
-              <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>DETECTION DETAILS</h3>
-              <FaceBox confidence={selected.confidence} identified={selected.trackingStatus === 'IDENTIFIED'} />
-              <div className="mt-3 space-y-2">
-                {[
-                  { label: 'Detection ID', value: selected.id },
-                  { label: 'Person ID', value: selected.personId || 'Unknown' },
-                  { label: 'Camera', value: selected.camera },
-                  { label: 'Location', value: selected.location },
-                  { label: 'Confidence', value: `${selected.confidence}%` },
-                  { label: 'Tracking', value: selected.trackingStatus },
-                  { label: 'Face Detected', value: selected.faceDetected ? 'Yes' : 'No' },
-                  { label: 'Detected At', value: new Date(selected.timestamp).toLocaleString('en-IN') },
-                ].map(item => (
-                  <div key={item.label} className="flex justify-between text-xs">
-                    <span style={{ color: 'var(--color-text-muted)' }}>{item.label}</span>
-                    <span className="font-medium" style={{ color: 'var(--color-text-secondary)' }}>{item.value}</span>
+        {/* Right panel - DB Hits */}
+        <div className="flex xl:flex-col xl:w-80 shrink-0 p-4 overflow-y-auto border-t-2 xl:border-t-0 xl:border-l-2 gap-4"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-surface)' }}>
+            <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>DATABASE MATCHES</h3>
+            
+            <div className="space-y-4">
+              {activeDetections.filter(d => d.database_info).length === 0 ? (
+                <div className="text-center py-6 text-xs text-muted border border-dashed border-border rounded-lg">
+                  No registered faces currently in frame.
+                </div>
+              ) : (
+                activeDetections.filter(d => d.database_info).map((det, i) => (
+                  <div key={i} className="p-3 rounded-lg border border-red-500/30 flex flex-col gap-3"
+                    style={{ background: 'var(--color-bg-elevated)' }}>
+                    <div className="flex gap-3">
+                        <img 
+                            src={`data:image/jpeg;base64,${det.database_info.photo_base64}`} 
+                            alt={det.class}
+                            className="w-16 h-16 object-cover rounded border border-border"
+                        />
+                        <div>
+                            <div className="text-red-500 font-bold text-sm uppercase">{det.class}</div>
+                            <div className="text-xs text-muted mb-1">Match: {(det.confidence * 100).toFixed(1)}%</div>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-500 font-mono border border-red-500/20">
+                                RECORD HIT
+                            </span>
+                        </div>
+                    </div>
+                    {det.database_info.additional_info?.notes && (
+                        <div className="text-xs p-2 rounded bg-black/20 border border-border">
+                            <span className="text-muted font-bold">Notes:</span> {det.database_info.additional_info.notes}
+                        </div>
+                    )}
                   </div>
-                ))}
-              </div>
+                ))
+              )}
             </div>
-          )}
-          <MotionPanel />
         </div>
       </div>
+
+      {showRegisterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
+            <div className="card w-full max-w-md p-6 border border-border">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-lg font-bold text-white">Register New Face</h2>
+                    <button onClick={() => { setShowRegisterModal(false); stopCapture(); }} className="text-muted hover:text-white">✕</button>
+                </div>
+                
+                <form onSubmit={handleRegister} className="space-y-4">
+                    <div>
+                        <label className="block text-xs font-bold text-muted mb-1">SUBJECT NAME (ID)</label>
+                        <input type="text" required value={regName} onChange={e => setRegName(e.target.value)} className="w-full bg-black/50 border border-border rounded px-3 py-2 text-sm text-white" placeholder="e.g. John_Doe" />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-muted mb-1">ADDITIONAL INFO</label>
+                        <textarea required value={regInfo} onChange={e => setRegInfo(e.target.value)} className="w-full bg-black/50 border border-border rounded px-3 py-2 text-sm text-white h-24" placeholder="Notes..." />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-muted mb-1">MUGSHOT PHOTO</label>
+                        {!isCapturing ? (
+                            <div className="space-y-2">
+                                <input type="file" accept="image/*" onChange={e => setRegFile(e.target.files?.[0] || null)} className="w-full bg-black/50 border border-border rounded px-3 py-2 text-sm text-white" />
+                                <div className="text-center text-xs text-muted">OR</div>
+                                <button type="button" onClick={startCapture} className="w-full py-2 bg-black border border-border hover:bg-gray-900 text-white text-sm rounded flex items-center justify-center gap-2">
+                                    <Camera size={14} /> CAPTURE FROM CAMERA
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="space-y-2 border border-border rounded overflow-hidden">
+                                <video ref={captureVideoRef} className="w-full h-48 bg-black object-cover" autoPlay muted playsInline />
+                                <div className="flex gap-2 p-2 bg-black/50">
+                                    <button type="button" onClick={takeSnapshot} className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded">SNAP</button>
+                                    <button type="button" onClick={stopCapture} className="flex-1 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded">CANCEL</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <button type="submit" disabled={isSubmitting} className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold rounded mt-4">
+                        {isSubmitting ? 'REGISTERING...' : 'REGISTER FACE'}
+                    </button>
+                </form>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

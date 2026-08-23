@@ -1,193 +1,364 @@
-import React, { useState, useEffect } from 'react';
-import { Moon, Activity, Eye, AlertTriangle, Clock } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Moon, Activity, Eye, Clock, Camera, Play, Upload, Crosshair } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
-import { cameras } from '../../data/cameras';
-import { PageHeader, StatCard, StatusBadge } from '../../components/common';
+import { PageHeader, StatCard } from '../../components/common';
 
-const NightCameraFeed: React.FC<{ name: string; id: string; active: boolean; motionDetected?: boolean }> = ({
-  name, id, active, motionDetected,
-}) => (
-  <div className="card overflow-hidden">
-    <div className="relative camera-feed-night rounded-t-lg overflow-hidden" style={{ height: '160px' }}>
-      {active ? (
-        <>
-          <div className="scan-line" />
-          {/* Night vision green tint */}
-          <div className="absolute inset-0 pointer-events-none" style={{ background: 'rgba(0,60,20,0.25)' }} />
-          {/* Grid */}
-          <div className="absolute inset-0 opacity-5" style={{
-            backgroundImage: 'linear-gradient(rgba(0,255,80,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,80,0.15) 1px, transparent 1px)',
-            backgroundSize: '25px 25px',
-          }} />
-          {/* Horizon */}
-          <div className="absolute bottom-1/3 left-0 right-0 h-px" style={{ background: 'rgba(0,200,60,0.15)' }} />
-          {/* Motion indicator */}
-          {motionDetected && (
-            <div className="absolute" style={{ left: '45%', top: '30%', width: '8%', height: '15%',
-              background: 'rgba(0,255,80,0.25)', border: '1px solid rgba(0,255,80,0.5)', borderRadius: '2px' }}>
-              <div className="absolute -top-5 -left-2 text-xs px-1 rounded"
-                style={{ background: 'rgba(0,200,60,0.85)', color: '#000', fontSize: '8px', whiteSpace: 'nowrap' }}>
-                MOTION
-              </div>
-            </div>
-          )}
-          <div className="absolute top-2 left-2">
-            <span style={{ background: 'rgba(0,180,60,0.85)', color: '#000', fontSize: '8px' }}
-              className="px-1.5 py-0.5 rounded font-bold">NIGHT IR</span>
-          </div>
-          <div className="absolute top-2 right-2 text-xs font-mono"
-            style={{ background: 'rgba(0,0,0,0.7)', color: '#4ade80', fontSize: '8px', padding: '2px 4px', borderRadius: '2px' }}>
-            {id}
-          </div>
-          <div className="absolute bottom-2 left-2 right-2 flex justify-between text-xs"
-            style={{ color: 'rgba(0,200,60,0.7)', fontSize: '8px' }}>
-            <span>LOW-LIGHT ENHANCED</span>
-            <span>{new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span>
-          </div>
-        </>
-      ) : (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-          <Moon size={24} style={{ color: '#1d4ed8', opacity: 0.5 }} />
-          <span className="text-xs" style={{ color: '#64748b' }}>OFFLINE</span>
-        </div>
-      )}
-    </div>
-    <div className="p-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs font-semibold" style={{ color: 'var(--color-text-primary)' }}>{name}</p>
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Night Vision · IR Active</p>
-        </div>
-        <StatusBadge status={active ? 'ONLINE' : 'OFFLINE'} size="sm" />
-      </div>
-      {motionDetected && (
-        <div className="mt-2 flex items-center gap-1.5 text-xs px-2 py-1 rounded"
-          style={{ background: 'rgba(0,200,60,0.08)', border: '1px solid rgba(0,200,60,0.2)', color: '#4ade80' }}>
-          <Activity size={11} /> Motion detected
-        </div>
-      )}
-    </div>
-  </div>
-);
+const SIMULATION_VIDEOS = [
+  '/res/night_video/istockphoto-1147398576-640_adpp_is.mp4',
+  '/res/night_video/istockphoto-1147423914-640_adpp_is.mp4',
+  '/res/night_video/istockphoto-684718024-640_adpp_is.mp4',
+];
 
-const MovementTimeline: React.FC = () => {
-  const events = [
-    { time: '21:10', event: 'Motion detected', camera: 'CAM-001', sector: 'NORTH', severity: 'HIGH' },
-    { time: '20:45', event: 'Curfew movement detected', camera: 'CAM-007', sector: 'WEST', severity: 'MEDIUM' },
-    { time: '20:30', event: 'Group activity', camera: 'CAM-012', sector: 'SOUTH', severity: 'MEDIUM' },
-    { time: '19:55', event: 'Thermal target lost', camera: 'CAM-012', sector: 'SOUTH', severity: 'LOW' },
-    { time: '19:30', event: 'Animal detected', camera: 'CAM-003', sector: 'NORTH', severity: 'INFO' },
-    { time: '18:45', event: 'Patrol route verified', camera: 'CAM-011', sector: 'SOUTH', severity: 'INFO' },
-  ];
-
-  const severityColor: Record<string, string> = {
-    HIGH: '#ef4444', MEDIUM: '#f59e0b', LOW: '#3b82f6', INFO: '#64748b',
-  };
-
-  return (
-    <div className="card p-4">
-      <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
-        Night Movement Timeline
-      </h3>
-      <div className="space-y-2">
-        {events.map((ev, i) => (
-          <div key={i} className="flex items-start gap-3">
-            <div className="flex flex-col items-center shrink-0">
-              <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>{ev.time}</span>
-              {i < events.length - 1 && <div className="w-px flex-1 mt-1" style={{ background: 'var(--color-border)', minHeight: '16px' }} />}
-            </div>
-            <div className="flex-1 pb-2">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full" style={{ background: severityColor[ev.severity] }} />
-                <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{ev.event}</span>
-              </div>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{ev.camera} · {ev.sector}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
+interface Detection {
+  xmin: number;
+  ymin: number;
+  xmax: number;
+  ymax: number;
+  confidence: number;
+  class: string;
+}
 
 const NightSurveillance: React.FC = () => {
   const { setCurrentPage } = useAppStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [isNightVision, setIsNightVision] = useState(true);
+  const [fps, setFps] = useState(0);
+  const [activeDetections, setActiveDetections] = useState<Detection[]>([]);
+  const [mediaSource, setMediaSource] = useState<'webcam'|'simulation'|'upload'|null>(null);
+  const [videoUrl, setVideoUrl] = useState<string>('');
+  const [processedImageUrl, setProcessedImageUrl] = useState<string | null>(null);
+  const [autoGreenDetect, setAutoGreenDetect] = useState(false);
 
-  useEffect(() => { setCurrentPage('night-surveillance'); }, [setCurrentPage]);
+  const frameCountRef = useRef(0);
+  const lastTimeRef = useRef(performance.now());
+  const isProcessingFrame = useRef(false);
 
-  const nightCameras = cameras.filter(c => c.type === 'NIGHT_VISION' || c.sector === 'NORTH' || c.sector === 'WEST');
+  useEffect(() => { 
+    setCurrentPage('night-surveillance'); 
+    startSimulation();
+    return () => {
+      stopWebcam();
+    };
+  }, [setCurrentPage]);
+
+  const stopWebcam = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+       const stream = videoRef.current.srcObject as MediaStream;
+       stream.getTracks().forEach(t => t.stop());
+       videoRef.current.srcObject = null;
+    }
+  };
+
+  const startWebcam = async () => {
+    stopWebcam();
+    setMediaSource('webcam');
+    setVideoUrl('');
+    setProcessedImageUrl(null);
+    if (videoRef.current) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: 'environment', width: 1280, height: 720 }
+        });
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      } catch (err) {
+        console.error("Webcam error:", err);
+      }
+    }
+  };
+
+  const startSimulation = () => {
+    stopWebcam();
+    setProcessedImageUrl(null);
+    const randomVid = SIMULATION_VIDEOS[Math.floor(Math.random() * SIMULATION_VIDEOS.length)];
+    setVideoUrl(randomVid);
+    setMediaSource('simulation');
+  };
+
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      stopWebcam();
+      setProcessedImageUrl(null);
+      setVideoUrl(URL.createObjectURL(file));
+      setMediaSource('upload');
+    }
+  };
+
+  const processFrame = useCallback(async () => {
+    if (!isDetecting || !videoRef.current || !canvasRef.current || isProcessingFrame.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    
+    if (video.readyState >= 2 && !video.paused && !video.ended) {
+      isProcessingFrame.current = true;
+      
+      // Calculate FPS
+      const now = performance.now();
+      frameCountRef.current++;
+      if (now - lastTimeRef.current >= 1000) {
+        setFps(frameCountRef.current);
+        frameCountRef.current = 0;
+        lastTimeRef.current = now;
+      }
+
+      // Calculate scale to limit max dimension to 320px to massively boost FPS
+      const MAX_DIM = 320;
+      let targetWidth = video.videoWidth;
+      let targetHeight = video.videoHeight;
+      if (targetWidth > MAX_DIM) {
+          targetHeight = (MAX_DIM / targetWidth) * targetHeight;
+          targetWidth = MAX_DIM;
+      }
+      
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+      
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        canvas.toBlob(async (blob) => {
+          if (!blob) {
+            isProcessingFrame.current = false;
+            return;
+          }
+          
+          const formData = new FormData();
+          formData.append('file', blob, 'frame.jpg');
+
+          try {
+            const res = await fetch('http://127.0.0.1:8000/detect-night', {
+              method: 'POST',
+              body: formData,
+            });
+            
+            if (res.ok) {
+              const data = await res.json();
+              setActiveDetections(data.detections || []);
+              setAutoGreenDetect(!!data.is_already_green);
+              if (data.image_base64) {
+                setProcessedImageUrl(`data:image/jpeg;base64,${data.image_base64}`);
+              }
+            }
+          } catch (err) {
+            console.error("Backend processing failed", err);
+          } finally {
+            isProcessingFrame.current = false;
+          }
+        }, 'image/jpeg', 0.5); // 50% quality for maximum network speed
+      } else {
+        isProcessingFrame.current = false;
+      }
+    }
+  }, [isDetecting]);
+
+  useEffect(() => {
+    let interval: number;
+    if (isDetecting) {
+      // Poll as fast as 10 FPS (limited by backend response time)
+      interval = window.setInterval(processFrame, 100);
+    } else {
+      setActiveDetections([]);
+      setProcessedImageUrl(null);
+      setFps(0);
+    }
+    return () => {
+      if (interval) window.clearInterval(interval);
+    };
+  }, [isDetecting, processFrame]);
+
+  // CSS Filter for styling the feed (Disabled if backend says it's already green)
+  const nightVisionStyle = (isNightVision && !autoGreenDetect) ? {
+    filter: 'sepia(100%) hue-rotate(90deg) saturate(400%) brightness(1.2) contrast(1.5)'
+  } : {};
 
   return (
-    <div className="flex flex-col h-full" style={{ height: 'calc(100vh - 56px)' }}>
+    <div className="flex flex-col h-full overflow-y-auto" style={{ height: 'calc(100vh - 56px)' }}>
       <PageHeader
-        title="Night Surveillance"
-        subtitle="Low-light monitoring · IR cameras active"
+        title="Night Surveillance (Backend AI)"
+        subtitle="OpenCV CLAHE Enhancement · YOLOv8 Inference"
         icon={<Moon size={16} />}
-        accent="#1d4ed8"
+        accent="#FF9933"
       />
 
-      {/* Stats */}
       <div className="grid grid-cols-4 gap-3 px-4 py-3 shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        <StatCard icon={<Eye size={16} />} label="Night Cameras" value={cameras.filter(c => c.type === 'NIGHT_VISION').length} sub="IR active" accent="#1d4ed8" />
-        <StatCard icon={<Activity size={16} />} label="Motion Events" value={4} sub="Last 6 hours" accent="var(--color-warning)" />
-        <StatCard icon={<AlertTriangle size={16} />} label="Night Alerts" value={2} sub="Active" accent="var(--color-danger)" />
+        <StatCard icon={<Eye size={16} />} label="Backend Status" value={isDetecting ? "PROCESSING" : "READY"} sub="FastAPI + OpenCV" accent={isDetecting ? "var(--color-success)" : "var(--color-warning)"} />
+        <StatCard icon={<Activity size={16} />} label="Stream FPS" value={fps} sub="Network Polling" accent="#C3B091" />
+        <StatCard icon={<Crosshair size={16} />} label="Objects Tracked" value={activeDetections.length} sub="Live Count" accent="#FF9933" />
         <StatCard icon={<Clock size={16} />} label="Curfew Status" value="ACTIVE" sub="20:00 – 06:00 hrs" accent="var(--color-success)" />
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Night camera grid */}
-          <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
-            <NightCameraFeed name="BOP North Gate Alpha" id="CAM-001" active={true} motionDetected={true} />
-            <NightCameraFeed name="West Sector Night Cam" id="CAM-007" active={true} motionDetected={false} />
-            <NightCameraFeed name="North Gate Night Vision" id="CAM-014" active={false} />
-            <NightCameraFeed name="South Patrol Road" id="CAM-011" active={true} motionDetected={false} />
-            <NightCameraFeed name="BOP North Perimeter East" id="CAM-002" active={true} motionDetected={true} />
-            <NightCameraFeed name="West Border Road" id="CAM-008" active={true} motionDetected={false} />
+      <div className="flex flex-1 flex-col xl:flex-row overflow-hidden min-h-[600px]">
+        <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
+          
+          <div className="card overflow-hidden flex flex-col w-full max-w-5xl mx-auto border-2" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="p-3 shrink-0 bg-black/20" style={{ borderBottom: '1px solid var(--color-border)' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex gap-2">
+                  <button onClick={startWebcam} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${mediaSource === 'webcam' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-surface hover:brightness-110 border border-border'}`}>
+                    <Camera size={14} /> LIVE WEBCAM
+                  </button>
+                  <button onClick={startSimulation} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${mediaSource === 'simulation' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-surface hover:brightness-110 border border-border'}`}>
+                    <Play size={14} /> SIMULATE VIDEO
+                  </button>
+                  <button onClick={() => fileInputRef.current?.click()} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${mediaSource === 'upload' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-surface hover:brightness-110 border border-border'}`}>
+                    <Upload size={14} /> UPLOAD FILE
+                  </button>
+                  <input type="file" ref={fileInputRef} onChange={handleUpload} accept="video/*" className="hidden" />
+                </div>
+                
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setIsNightVision(!isNightVision)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all hover:brightness-110"
+                    style={{ background: isNightVision ? 'rgba(19, 136, 8, 0.2)' : 'var(--color-bg-elevated)', color: isNightVision ? '#138808' : 'var(--color-text-muted)', border: `1px solid ${isNightVision ? 'rgba(19,136,8,0.5)' : 'var(--color-border)'}` }}
+                  >
+                    <Moon size={14} /> {autoGreenDetect ? 'AUTO-GREEN OVERRIDE' : 'GREEN FILTER'}
+                  </button>
+                  <button 
+                    onClick={() => setIsDetecting(!isDetecting)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all hover:brightness-110"
+                    style={{ background: isDetecting ? 'rgba(255, 153, 51, 0.2)' : 'var(--color-bg-elevated)', color: isDetecting ? '#FF9933' : 'var(--color-text-muted)', border: `1px solid ${isDetecting ? 'rgba(255,153,51,0.5)' : 'var(--color-border)'}` }}
+                  >
+                    <Crosshair size={14} /> BACKEND PROCESSING
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative bg-black w-full flex items-center justify-center min-h-[400px]">
+              
+              {/* Hidden video element used purely for playback and extraction */}
+              <video 
+                ref={videoRef}
+                src={mediaSource === 'simulation' || mediaSource === 'upload' ? videoUrl : undefined}
+                className={`w-full h-full object-contain ${processedImageUrl ? 'hidden' : 'block'}`}
+                style={nightVisionStyle}
+                autoPlay 
+                playsInline 
+                muted={mediaSource !== 'webcam'} 
+                loop={mediaSource !== 'webcam'}
+                crossOrigin="anonymous"
+              />
+              
+              {/* Image element that shows the CLAHE enhanced frames from Backend */}
+              {processedImageUrl && (
+                 <div className="relative w-full h-full flex justify-center items-center">
+                    <img 
+                      src={processedImageUrl} 
+                      className="w-full h-full object-contain" 
+                      style={nightVisionStyle}
+                      alt="Backend Processed Feed" 
+                    />
+                    
+                    {/* Bounding Boxes overlay */}
+                    {videoRef.current && (() => {
+                        // We must match the SVG viewBox to the EXACT dimensions the backend processed.
+                        const MAX_DIM = 320;
+                        let svgWidth = videoRef.current.videoWidth;
+                        let svgHeight = videoRef.current.videoHeight;
+                        if (svgWidth > MAX_DIM) {
+                            svgHeight = (MAX_DIM / svgWidth) * svgHeight;
+                            svgWidth = MAX_DIM;
+                        }
+                        
+                        return (
+                          <svg 
+                            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+                            className="absolute inset-0 w-full h-full"
+                            preserveAspectRatio="xMidYMid meet"
+                          >
+                            {activeDetections.map((det, idx) => {
+                              const isPerson = det.class.toLowerCase() === 'human' || det.class.toLowerCase() === 'person';
+                              const boxColor = isPerson ? '#ef4444' : '#FF9933';
+                              const fillColor = isPerson ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 153, 51, 0.2)';
+                              
+                              return (
+                                <g key={idx}>
+                                  <rect 
+                                    x={det.xmin} y={det.ymin} 
+                                    width={det.xmax - det.xmin} height={det.ymax - det.ymin} 
+                                    fill={fillColor} stroke={boxColor} strokeWidth="2"
+                                  />
+                                  <rect 
+                                    x={det.xmin} y={det.ymin - 16} 
+                                    width={det.xmax - det.xmin} height="16" 
+                                    fill={boxColor}
+                                  />
+                                  <text 
+                                    x={det.xmin + 2} y={det.ymin - 4} 
+                                    fill="#000" fontSize="10" fontWeight="bold" fontFamily="monospace"
+                                  >
+                                    {det.class.toUpperCase()} {(det.confidence * 100).toFixed(0)}%
+                                  </text>
+                                </g>
+                              )
+                            })}
+                          </svg>
+                        );
+                    })()}
+                 </div>
+              )}
+
+              {/* Hidden Canvas used for extraction */}
+              <canvas ref={canvasRef} className="hidden" />
+
+            </div>
           </div>
 
-          <MovementTimeline />
         </div>
 
-        {/* Right: Night alert panel */}
-        <div className="hidden xl:flex flex-col w-64 shrink-0 p-4 overflow-y-auto"
-          style={{ borderLeft: '1px solid var(--color-border)', background: 'var(--color-bg-surface)' }}>
-          <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>NIGHT ALERTS</h3>
-          <div className="space-y-3">
-            {[
-              { time: '21:10', severity: 'CRITICAL', title: 'Border intrusion', camera: 'CAM-001' },
-              { time: '20:45', severity: 'MEDIUM', title: 'Curfew violation', camera: 'CAM-007' },
-              { time: '20:30', severity: 'MEDIUM', title: 'Group gathering', camera: 'CAM-012' },
-            ].map((a, i) => (
-              <div key={i} className="p-2 rounded"
-                style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)' }}>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-xs font-bold" style={{ color: a.severity === 'CRITICAL' ? '#ff2020' : a.severity === 'HIGH' ? '#ef4444' : '#f59e0b' }}>
-                    {a.severity}
-                  </span>
-                  <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{a.time}</span>
+        {/* Telemetry panel */}
+        <div className="flex xl:flex-col xl:w-72 shrink-0 p-4 overflow-y-auto border-t-2 xl:border-t-0 xl:border-l-2 gap-4"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-surface)' }}>
+          <div className="flex-1 xl:flex-none">
+            <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>LIVE TELEMETRY</h3>
+            
+            <div className="space-y-3 mb-6">
+              <div className="p-3 rounded-lg border border-border bg-card">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-muted">Backend Sync Rate</span>
+                  <span className="text-sm font-bold font-mono" style={{ color: fps > 0 ? '#138808' : '#FF9933' }}>{fps} FPS</span>
                 </div>
-                <p className="text-xs" style={{ color: 'var(--color-text-primary)' }}>{a.title}</p>
-                <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{a.camera}</p>
+                <div className="w-full h-1.5 bg-black/50 rounded overflow-hidden">
+                  <div className="h-full transition-all" style={{ width: `${Math.min(fps / 5 * 100, 100)}%`, background: fps > 0 ? '#138808' : '#FF9933' }} />
+                </div>
               </div>
-            ))}
+
+              <div className="p-3 rounded-lg border border-border bg-card">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-muted">Active Objects</span>
+                  <span className="text-sm font-bold font-mono text-white">{activeDetections.length}</span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="mt-4">
-            <h3 className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>LOW-LIGHT STATUS</h3>
-            <div className="space-y-2">
-              {[
-                { label: 'IR Illumination', value: 'Active', color: '#10b981' },
-                { label: 'Fog Density', value: 'Low', color: '#10b981' },
-                { label: 'Visibility', value: '350m', color: '#10b981' },
-                { label: 'Moon Phase', value: 'Crescent', color: '#94a3b8' },
-                { label: 'Cloud Cover', value: 'Partial', color: '#f59e0b' },
-              ].map(item => (
-                <div key={item.label} className="flex justify-between text-xs">
-                  <span style={{ color: 'var(--color-text-muted)' }}>{item.label}</span>
-                  <span style={{ color: item.color }}>{item.value}</span>
+          <div className="flex-1 xl:flex-none">
+            <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>DETECTION LOG</h3>
+            <div className="space-y-2 max-h-48 xl:max-h-none overflow-y-auto">
+              {activeDetections.length === 0 ? (
+                <div className="text-center py-6 text-xs text-muted border border-dashed border-border rounded-lg">
+                  No signatures detected
                 </div>
-              ))}
+              ) : (
+                activeDetections.map((det, i) => (
+                  <div key={i} className="p-2 rounded flex items-center justify-between"
+                    style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)' }}>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full" style={{ background: (det.class.toLowerCase() === 'human' || det.class.toLowerCase() === 'person') ? '#ef4444' : '#FF9933' }} />
+                      <span className="text-xs font-bold uppercase" style={{ color: 'var(--color-text-primary)' }}>{det.class}</span>
+                    </div>
+                    <span className="text-xs font-mono" style={{ color: '#138808' }}>{(det.confidence * 100).toFixed(1)}%</span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

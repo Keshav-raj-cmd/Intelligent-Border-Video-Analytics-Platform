@@ -6,7 +6,7 @@ import {
   Database, Settings, ChevronDown, ChevronRight,
   Network, FolderOpen, Lightbulb, CheckSquare, Clock,
   UserSquare, Camera, Activity, Monitor, Building2,
-  Crosshair, TrendingUp, Cpu,
+  Crosshair, TrendingUp, Cpu, LogOut,
 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 
@@ -156,7 +156,11 @@ const SidebarGroup: React.FC<{
 };
 
 const Sidebar: React.FC = () => {
-  const { sidebarCollapsed } = useAppStore();
+  const { sidebarCollapsed, setAuthenticated } = useAppStore();
+
+  const handleLogout = () => {
+    setAuthenticated(false);
+  };
 
   return (
     <aside
@@ -216,20 +220,29 @@ const Sidebar: React.FC = () => {
       {/* Bottom section */}
       {!sidebarCollapsed && (
         <div
-          className="px-3 py-3 text-xs shrink-0"
+          className="px-3 py-3 text-xs shrink-0 flex items-center justify-between"
           style={{
             borderTop: '1px solid var(--color-border)',
             color: 'var(--color-text-muted)',
           }}
         >
-          <div className="flex items-center gap-1.5">
-            <Activity size={11} />
-            <span>IBVAP v1.0 — Frontend Preview</span>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <Activity size={11} />
+              <span>IBVAP v1.0 — Frontend</span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <Monitor size={11} />
+              <span>15 Cameras | 5 Sectors</span>
+            </div>
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5">
-            <Monitor size={11} />
-            <span>15 Cameras | 5 Sectors</span>
-          </div>
+          <button 
+            onClick={handleLogout}
+            className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-red-400 transition-colors"
+            title="Secure Logout"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       )}
     </aside>
