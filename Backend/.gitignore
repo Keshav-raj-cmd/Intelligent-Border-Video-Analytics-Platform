@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+venv/
+ENV/
+
+# Model files
+*.pt
+*.pth
+*.onnx
+
+# Database files
+*.db
+
+# Test files
+dummy.jpg
+test_api.py
+
+# Storage
+storage/
