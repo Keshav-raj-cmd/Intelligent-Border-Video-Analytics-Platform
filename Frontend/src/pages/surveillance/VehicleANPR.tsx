@@ -1,44 +1,64 @@
 import React, { useState, useEffect } from 'react';
-import { Car, AlertTriangle, Flag, Search, ChevronRight, Eye } from 'lucide-react';
+import { Car, AlertTriangle, Flag, Search, ChevronRight, Eye, ShieldAlert, CheckCircle, Clock, Camera, Wifi, VideoOff, UploadCloud, Plus, Database, FileVideo } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
-import { vehicles } from '../../data/vehicles';
-import { Vehicle } from '../../types';
 import { SearchBar, FilterButton, SectorBadge, PageHeader, StatCard, Btn } from '../../components/common';
-import { Camera, Wifi, VideoOff, UploadCloud, Plus, Database, FileVideo } from 'lucide-react';
+import { VideoPlayerControls } from '../../components/VideoPlayerControls';
 
-const PlateDisplay: React.FC<{ plate: string; flagged: boolean }> = ({ plate, flagged }) => (
-  <div className="relative camera-feed rounded overflow-hidden" style={{ height: '70px' }}>
-    <div className="absolute inset-0 flex items-center justify-center">
-      <div
-        className="px-4 py-2 rounded font-mono font-bold text-lg tracking-widest"
-        style={{
-          background: flagged ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.05)',
-          border: `2px solid ${flagged ? '#ef4444' : 'rgba(255,255,255,0.15)'}`,
-          color: flagged ? '#ef4444' : '#f1f5f9',
-        }}
-      >
-        {plate}
+const PlateDisplay: React.FC<{ plate: string; riskLevel: string }> = ({ plate, riskLevel }) => {
+  const isHighRisk = riskLevel === 'HIGH' || riskLevel === 'CRITICAL';
+  const isReview = riskLevel === 'REVIEW';
+  
+  let bgColor = 'rgba(255,255,255,0.05)';
+  let borderColor = 'rgba(255,255,255,0.15)';
+  let textColor = '#f1f5f9';
+  let badgeColor = '';
+  let badgeText = '';
+
+  if (isHighRisk) {
+    bgColor = 'rgba(239,68,68,0.15)';
+    borderColor = '#ef4444';
+    textColor = '#ef4444';
+    badgeColor = 'rgba(239,68,68,0.85)';
+    badgeText = 'CRITICAL ALERT';
+  } else if (isReview) {
+    bgColor = 'rgba(234,179,8,0.15)';
+    borderColor = '#eab308';
+    textColor = '#eab308';
+    badgeColor = 'rgba(234,179,8,0.85)';
+    badgeText = 'UNDER REVIEW';
+  } else {
+    bgColor = 'rgba(16,185,129,0.15)';
+    borderColor = '#10b981';
+    textColor = '#10b981';
+    badgeColor = 'rgba(16,185,129,0.85)';
+    badgeText = 'CLEAN';
+  }
+
+  return (
+    <div className="relative camera-feed rounded overflow-hidden" style={{ height: '70px' }}>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div
+          className="px-4 py-2 rounded font-mono font-bold text-lg tracking-widest"
+          style={{ background: bgColor, border: `2px solid ${borderColor}`, color: textColor }}
+        >
+          {plate}
+        </div>
       </div>
-    </div>
-    {flagged && (
       <div className="absolute top-1 right-1 text-xs flex items-center gap-1 px-1.5 py-0.5 rounded"
-        style={{ background: 'rgba(239,68,68,0.85)', color: '#fff', fontSize: '9px' }}>
-        <AlertTriangle size={9} /> FLAGGED
+        style={{ background: badgeColor, color: '#fff', fontSize: '9px', fontWeight: 'bold' }}>
+        {isHighRisk && <AlertTriangle size={9} />}
+        {isReview && <Clock size={9} />}
+        {!isHighRisk && !isReview && <CheckCircle size={9} />}
+        {badgeText}
       </div>
-    )}
-    <div className="absolute top-1 left-1 text-xs px-1 rounded"
-      style={{ background: 'rgba(0,0,0,0.7)', color: '#94a3b8', fontSize: '8px' }}>
-      ANPR
     </div>
-  </div>
-);
+  );
+};
 
 const VehicleANPR: React.FC = () => {
   const { setCurrentPage } = useAppStore();
   const [search, setSearch] = useState('');
   const [dirFilter, setDirFilter] = useState('ALL');
-  const [selected, setSelected] = useState<Vehicle | null>(vehicles[0]);
-  const [showFlagged, setShowFlagged] = useState(false);
   
   // Real-time Detection States
   const [isLive, setIsLive] = useState(false);
@@ -49,6 +69,7 @@ const VehicleANPR: React.FC = () => {
   
   // Database States
   const [dbVehicles, setDbVehicles] = useState<any[]>([]);
+  const [suspiciousVehicles, setSuspiciousVehicles] = useState<any[]>([]);
   const [showDbModal, setShowDbModal] = useState(false);
   const [dbUploadFile, setDbUploadFile] = useState<File | null>(null);
   
@@ -68,6 +89,7 @@ const VehicleANPR: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         setDbVehicles(data.vehicles || []);
+        setSuspiciousVehicles(data.suspicious_vehicles || []);
       }
     } catch (e) {
       console.error(e);
@@ -194,7 +216,7 @@ const VehicleANPR: React.FC = () => {
     let interval: any;
     if (isLive) {
       if (cameraMode === 'webcam' || cameraMode === 'file') {
-        interval = setInterval(captureAndDetect, 300); // 300ms interval for faster scanning!
+        interval = setInterval(captureAndDetect, 300); // 300ms interval for faster scanning
       } else if (cameraMode === 'ipcam') {
         interval = setInterval(pollIpCam, 300);
       }
@@ -218,47 +240,40 @@ const VehicleANPR: React.FC = () => {
     }
   };
 
-  const filtered = vehicles.filter(v => {
-    const matchSearch =
-      v.plateNumber.toLowerCase().includes(search.toLowerCase()) ||
-      v.type.toLowerCase().includes(search.toLowerCase()) ||
-      v.color.toLowerCase().includes(search.toLowerCase());
-    const matchDir = dirFilter === 'ALL' || v.direction === dirFilter;
-    const matchFlagged = !showFlagged || v.flagged;
-    return matchSearch && matchDir && matchFlagged;
-  });
-
-  const flagged = vehicles.filter(v => v.flagged).length;
-  const watchlisted = vehicles.filter(v => v.watchlisted).length;
+  const getRiskColor = (level: string) => {
+    if (level === 'CRITICAL' || level === 'HIGH') return '#ef4444';
+    if (level === 'REVIEW') return '#eab308';
+    return '#10b981';
+  };
 
   return (
     <div className="flex flex-col h-full" style={{ height: 'calc(100vh - 56px)' }}>
       <PageHeader
-        title="Vehicle & ANPR Intelligence"
-        subtitle={`${vehicles.length} vehicles detected today`}
+        title="Vehicle Intelligence & Watchlist"
+        subtitle={`Tracking system active - Monitoring ${dbVehicles.length} registered and ${suspiciousVehicles.length} flagged vehicles`}
         icon={<Car size={16} />}
         actions={
           <div className="flex items-center gap-2">
             {!isLive ? (
               <>
                 <input type="file" accept="video/*" ref={fileInputRef} className="hidden" onChange={handleVideoFile} />
-                <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded flex items-center gap-2">
+                <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded flex items-center gap-2 transition-colors">
                   <FileVideo size={14} /> LOCAL VIDEO
                 </button>
-                <button onClick={startWebcam} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-2">
+                <button onClick={startWebcam} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-2 transition-colors">
                   <Camera size={14} /> WEBCAM
                 </button>
-                <button onClick={startIpCam} className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded flex items-center gap-2">
+                <button onClick={startIpCam} className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded flex items-center gap-2 transition-colors">
                   <Wifi size={14} /> IP CAM
                 </button>
               </>
             ) : (
-              <button onClick={stopFeed} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded flex items-center gap-2">
+              <button onClick={stopFeed} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded flex items-center gap-2 transition-colors">
                 <VideoOff size={14} /> STOP
               </button>
             )}
-            <button onClick={() => setShowDbModal(true)} className="px-3 py-1.5 bg-gray-800 border border-border text-white text-xs font-bold rounded flex items-center gap-2">
-              <Database size={14} /> DB REGISTRY
+            <button onClick={() => setShowDbModal(true)} className="px-3 py-1.5 bg-gray-800 border border-border hover:bg-gray-700 text-white text-xs font-bold rounded flex items-center gap-2 transition-colors">
+              <Database size={14} /> WATCHLIST DB
             </button>
           </div>
         }
@@ -266,18 +281,10 @@ const VehicleANPR: React.FC = () => {
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3 px-4 py-3 shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        <StatCard icon={<Car size={16} />} label="Total Vehicles" value={dbVehicles.length} sub="In Database" accent="var(--color-primary)" />
-        <StatCard icon={<AlertTriangle size={16} />} label="Flagged" value={dbVehicles.filter(v => v.flagged).length} sub="Need review" accent="var(--color-danger)" />
-        <StatCard icon={<Eye size={16} />} label="Live Detections" value={activeDetections.length} sub="In Frame" accent="var(--color-success)" />
-        <StatCard icon={<Flag size={16} />} label="Matches" value={activeDetections.filter(d => d.database_info).length} sub="DB Hits" accent="var(--color-warning)" />
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center gap-2 px-4 py-2 shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Direction:</span>
-        {['ALL', 'INBOUND', 'OUTBOUND', 'CROSSING', 'UNKNOWN'].map(d => (
-          <FilterButton key={d} label={d} active={dirFilter === d} onClick={() => setDirFilter(d)} />
-        ))}
+        <StatCard icon={<Car size={16} />} label="Total Vehicles" value={dbVehicles.length} sub="Registered" accent="var(--color-primary)" />
+        <StatCard icon={<ShieldAlert size={16} />} label="Watchlist" value={suspiciousVehicles.length} sub="Critical/High" accent="var(--color-danger)" />
+        <StatCard icon={<Eye size={16} />} label="Live Objects" value={activeDetections.length} sub="Being Tracked" accent="var(--color-success)" />
+        <StatCard icon={<Flag size={16} />} label="Matches" value={activeDetections.filter(d => d.risk_level !== 'NORMAL').length} sub="Alerts Triggered" accent="var(--color-warning)" />
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -286,9 +293,9 @@ const VehicleANPR: React.FC = () => {
             {!isLive && (
                 <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: 'rgba(0,0,0,0.7)' }}>
                     <div className="text-center">
-                        <Eye size={48} className="mx-auto mb-4" style={{ color: 'var(--color-text-muted)' }} />
-                        <h2 className="text-xl font-bold" style={{ color: 'var(--color-text-secondary)' }}>ANPR OFFLINE</h2>
-                        <p className="text-sm mt-2" style={{ color: 'var(--color-text-muted)' }}>Start a feed to initialize Optical Character Recognition</p>
+                        <ShieldAlert size={48} className="mx-auto mb-4" style={{ color: 'var(--color-text-muted)' }} />
+                        <h2 className="text-xl font-bold" style={{ color: 'var(--color-text-secondary)' }}>WATCHLIST DETECTION OFFLINE</h2>
+                        <p className="text-sm mt-2" style={{ color: 'var(--color-text-muted)' }}>Start a video feed to initialize Multi-Object Tracking & ANPR</p>
                     </div>
                 </div>
             )}
@@ -300,9 +307,11 @@ const VehicleANPR: React.FC = () => {
                 ref={videoRef}
                 className={`w-full h-full object-contain bg-black ${cameraMode === 'ipcam' ? 'hidden' : ''}`}
                 playsInline
-                controls
                 muted
             />
+            {cameraMode === 'file' && videoRef.current && (
+                <VideoPlayerControls videoRef={videoRef as React.RefObject<HTMLVideoElement>} />
+            )}
             <canvas ref={canvasRef} className="hidden" />
 
             {/* SVG OVERLAY FOR BOXES */}
@@ -313,11 +322,14 @@ const VehicleANPR: React.FC = () => {
                 preserveAspectRatio="xMidYMid meet"
               >
                 {activeDetections.map((det, idx) => {
-                  const isMatch = !!det.database_info;
-                  const isFlagged = isMatch && det.database_info.flagged;
+                  const riskLevel = det.risk_level || 'NORMAL';
+                  const boxColor = getRiskColor(riskLevel);
                   
-                  const boxColor = isFlagged ? '#ef4444' : (isMatch ? '#10b981' : '#3b82f6');
-                  const fillColor = isFlagged ? 'rgba(239, 68, 68, 0.1)' : (isMatch ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)');
+                  // Background fill color
+                  let fillColor = 'rgba(59, 130, 246, 0.1)';
+                  if (riskLevel === 'CRITICAL' || riskLevel === 'HIGH') fillColor = 'rgba(239, 68, 68, 0.15)';
+                  else if (riskLevel === 'REVIEW') fillColor = 'rgba(234, 179, 8, 0.15)';
+                  else if (riskLevel === 'NORMAL') fillColor = 'rgba(16, 185, 129, 0.1)';
                   
                   return (
                     <g key={idx}>
@@ -328,15 +340,21 @@ const VehicleANPR: React.FC = () => {
                       />
                       {/* Text background */}
                       <rect 
-                        x={det.xmin} y={det.ymin - 24} 
-                        width={Math.max(120, det.xmax - det.xmin)} height="24" 
+                        x={det.xmin} y={det.ymin - 32} 
+                        width={Math.max(140, det.xmax - det.xmin)} height="32" 
                         fill={boxColor}
                       />
                       <text 
-                        x={det.xmin + 4} y={det.ymin - 8} 
-                        fill="#fff" fontSize="14" fontWeight="bold" fontFamily="monospace"
+                        x={det.xmin + 4} y={det.ymin - 18} 
+                        fill="#fff" fontSize="11" fontWeight="bold" fontFamily="monospace"
                       >
-                        {det.plate_text || det.class.toUpperCase()}
+                        ID: {det.track_id} | {det.class.toUpperCase()}
+                      </text>
+                      <text 
+                        x={det.xmin + 4} y={det.ymin - 4} 
+                        fill="#fff" fontSize="13" fontWeight="bold" fontFamily="monospace"
+                      >
+                        {det.plate_text || "DETECTING..."}
                       </text>
                     </g>
                   )
@@ -346,45 +364,51 @@ const VehicleANPR: React.FC = () => {
           </div>
         </div>
 
-        {/* Selected vehicle detail */}
-        {/* DB Matches panel */}
+        {/* Live Match panel */}
         <div className="hidden xl:flex xl:flex-col xl:w-80 shrink-0 p-4 overflow-y-auto border-l-2 gap-4"
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-surface)' }}>
-          <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>DATABASE MATCHES</h3>
+          <h3 className="text-xs font-semibold mb-1 flex items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
+            <Flag size={14} /> LIVE DETECTIONS
+          </h3>
           
           <div className="space-y-4">
-            {activeDetections.filter(d => d.database_info).length === 0 ? (
+            {activeDetections.length === 0 ? (
               <div className="text-center py-6 text-xs text-muted border border-dashed border-border rounded-lg">
-                No registered vehicles currently in frame.
+                No vehicles currently tracked.
               </div>
             ) : (
-              activeDetections.filter(d => d.database_info).map((det, i) => (
-                <div key={i} className={`p-3 rounded-lg border ${det.database_info.flagged ? 'border-red-500/30' : 'border-green-500/30'} flex flex-col gap-3`}
-                  style={{ background: 'var(--color-bg-elevated)' }}>
-                  <PlateDisplay plate={det.database_info.plate_number} flagged={det.database_info.flagged} />
-                  
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-gray-500">Model:</span>
-                      <div className="font-bold text-white">{det.database_info.model}</div>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Color:</span>
-                      <div className="font-bold text-white">{det.database_info.color}</div>
-                    </div>
-                    <div className="col-span-2">
-                      <span className="text-gray-500">Owner:</span>
-                      <div className="font-bold text-white">{det.database_info.owner_name}</div>
-                    </div>
-                    {det.database_info.flagged && (
-                      <div className="col-span-2 mt-1 p-2 bg-red-500/10 border border-red-500/20 rounded">
-                        <span className="text-red-500 font-bold">WARRANTS:</span>
-                        <p className="text-red-400 mt-0.5">{det.database_info.warrants}</p>
+              activeDetections.map((det, i) => {
+                const riskLevel = det.risk_level || 'NORMAL';
+                const isHighRisk = riskLevel === 'HIGH' || riskLevel === 'CRITICAL';
+                
+                return (
+                  <div key={i} className={`p-3 rounded-lg border ${isHighRisk ? 'border-red-500/50' : (riskLevel === 'REVIEW' ? 'border-yellow-500/50' : 'border-green-500/30')} flex flex-col gap-3 shadow-sm`}
+                    style={{ background: 'var(--color-bg-elevated)' }}>
+                    <PlateDisplay plate={det.plate_text || 'UNREADABLE'} riskLevel={riskLevel} />
+                    
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-gray-500">Track ID:</span>
+                        <div className="font-bold text-white">{det.track_id}</div>
                       </div>
-                    )}
+                      <div>
+                        <span className="text-gray-500">Class:</span>
+                        <div className="font-bold text-white">{det.class}</div>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-gray-500">Confidence:</span>
+                        <div className="font-bold text-white">{(det.confidence * 100).toFixed(1)}%</div>
+                      </div>
+                      {isHighRisk && (
+                        <div className="col-span-2 mt-1 p-2 bg-red-500/10 border border-red-500/20 rounded animate-pulse">
+                          <span className="text-red-500 font-bold flex items-center gap-1"><AlertTriangle size={12}/> ACTION REQUIRED</span>
+                          <p className="text-red-400 mt-0.5">Vehicle matches suspicious watchlist.</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
         </div>
@@ -392,32 +416,64 @@ const VehicleANPR: React.FC = () => {
 
       {/* Database Management Modal */}
       {showDbModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
-            <div className="card w-full max-w-2xl p-6 border border-border max-h-[80vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm" style={{ background: 'rgba(0,0,0,0.8)' }}>
+            <div className="card w-full max-w-4xl p-6 border border-border max-h-[85vh] overflow-y-auto shadow-2xl">
                 <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2"><Database size={20} /> Registry</h2>
-                    <button onClick={() => setShowDbModal(false)} className="text-muted hover:text-white">✕</button>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2"><Database size={24} className="text-blue-500" /> Watchlist Database Registry</h2>
+                    <button onClick={() => setShowDbModal(false)} className="text-muted hover:text-white p-2 rounded-full hover:bg-gray-800 transition-colors">✕</button>
                 </div>
                 
-                <div className="mb-6 p-4 border border-dashed border-border rounded-lg bg-black/50">
-                  <h3 className="text-sm font-bold mb-2">Upload Database (Excel/CSV)</h3>
+                <div className="mb-6 p-5 border border-dashed border-border rounded-xl bg-black/40 flex items-center gap-4">
+                  <div className="flex-1">
+                    <h3 className="text-sm font-bold mb-1">Batch Import Watchlist</h3>
+                    <p className="text-xs text-gray-400">Upload an Excel (.xlsx) or CSV file containing plate numbers and case references.</p>
+                  </div>
                   <form onSubmit={handleExcelUpload} className="flex gap-2">
-                    <input type="file" accept=".xlsx,.csv" onChange={e => setDbUploadFile(e.target.files?.[0] || null)} className="flex-1 bg-black border border-border rounded px-3 py-1.5 text-sm" />
-                    <button type="submit" className="px-4 py-1.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded text-sm flex items-center gap-2">
-                      <UploadCloud size={14} /> UPLOAD
+                    <input type="file" accept=".xlsx,.csv" onChange={e => setDbUploadFile(e.target.files?.[0] || null)} className="bg-gray-900 border border-border rounded px-3 py-2 text-sm text-gray-300 w-64" />
+                    <button type="submit" className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded text-sm flex items-center gap-2 transition-colors">
+                      <UploadCloud size={16} /> UPLOAD
                     </button>
                   </form>
                 </div>
 
-                <div>
-                  <h3 className="text-sm font-bold mb-3">Currently Registered ({dbVehicles.length})</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    {dbVehicles.map((v: any) => (
-                      <div key={v.plate_number} className={`p-2 text-xs border rounded ${v.flagged ? 'border-red-500/50 bg-red-500/10' : 'border-border bg-black/30'}`}>
-                        <div className="font-bold font-mono">{v.plate_number}</div>
-                        <div className="text-gray-400">{v.model} - {v.color}</div>
-                      </div>
-                    ))}
+                <div className="grid grid-cols-2 gap-6">
+                  {/* Suspicious Vehicles Column */}
+                  <div>
+                    <h3 className="text-sm font-bold mb-3 flex items-center gap-2 text-red-400">
+                      <ShieldAlert size={16} /> Suspicious Watchlist ({suspiciousVehicles.length})
+                    </h3>
+                    <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                      {suspiciousVehicles.length === 0 ? <p className="text-xs text-gray-500">No vehicles on watchlist.</p> : null}
+                      {suspiciousVehicles.map((v: any) => (
+                        <div key={v.plate_number} className="p-3 text-xs border rounded-lg border-red-500/30 bg-red-950/20 shadow-sm flex flex-col gap-1">
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold font-mono text-red-400 text-sm tracking-wider">{v.plate_number}</span>
+                            <span className="bg-red-500/20 text-red-500 px-2 py-0.5 rounded text-[10px] font-bold">{v.risk_level}</span>
+                          </div>
+                          <div className="text-gray-400">{v.vehicle_make} {v.vehicle_model} - {v.vehicle_color}</div>
+                          {v.reason && <div className="text-gray-500 mt-1 italic">"{v.reason}"</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Registered Vehicles Column */}
+                  <div>
+                    <h3 className="text-sm font-bold mb-3 flex items-center gap-2 text-green-400">
+                      <CheckCircle size={16} /> Registered Vehicles ({dbVehicles.length})
+                    </h3>
+                    <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                      {dbVehicles.length === 0 ? <p className="text-xs text-gray-500">No registered vehicles.</p> : null}
+                      {dbVehicles.map((v: any) => (
+                        <div key={v.plate_number} className="p-3 text-xs border rounded-lg border-green-500/20 bg-green-950/10 shadow-sm flex flex-col gap-1">
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold font-mono text-green-400 text-sm tracking-wider">{v.plate_number}</span>
+                            <span className="text-gray-500">{v.owner_name}</span>
+                          </div>
+                          <div className="text-gray-400">{v.make} {v.model} - {v.color}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
             </div>

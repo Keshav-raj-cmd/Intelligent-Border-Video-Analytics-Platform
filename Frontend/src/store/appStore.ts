@@ -9,6 +9,10 @@ interface AppState {
   // Sidebar
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
+  
+  // Priority Mode
+  priorityMode: boolean;
+  togglePriorityMode: () => void;
 
   // Authentication
   isAuthenticated: boolean;
@@ -48,6 +52,9 @@ let msgCounter = 100;
 export const useAppStore = create<AppState>((set, get) => ({
   sidebarCollapsed: false,
   toggleSidebar: () => set(s => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  
+  priorityMode: false,
+  togglePriorityMode: () => set(s => ({ priorityMode: !s.priorityMode })),
 
   isAuthenticated: localStorage.getItem('auth_token') !== null,
   setAuthenticated: (val: boolean) => {
@@ -63,7 +70,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeAIDrawer: () => set({ aiDrawerOpen: false }),
   toggleAIDrawer: () => set(s => ({ aiDrawerOpen: !s.aiDrawerOpen })),
 
-  sendAIMessage: (message: string) => {
+  sendAIMessage: async (message: string) => {
     const userMsg: AIMessage = {
       id: `msg-${++msgCounter}`,
       role: 'user',
@@ -79,6 +86,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
     set(s => ({ aiMessages: [...s.aiMessages, userMsg, loadingMsg], aiLoading: true }));
 
+    // SYSTEM PROMPT FOR LLM INTEGRATION:
+    // When hooking this up to a real LLM API (Gemini/OpenAI), inject this system instruction:
+    // "You are the IBVAP AI Assistant. Reply in normal plain text instead of markdown. 
+    // Do not use any bolding, asterisks, or formatting. Restrict your answers strictly 
+    // to the defence and surveillance system. Do not answer general knowledge questions 
+    // outside of this domain. If asked outside this scope, politely decline."
+    
+    // Simulate API delay if no real API is hooked up, or try real API
+    try {
+      const res = await fetch('http://localhost:8000/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        set(s => ({
+          aiLoading: false,
+          aiMessages: s.aiMessages.map(m =>
+            m.isLoading ? { ...m, content: data.reply, isLoading: false } : m
+          ),
+        }));
+        return; // Exit if success
+      }
+    } catch (e) {
+      console.log('LLM API not reachable or failed, falling back to mock...');
+    }
+
+    // Fallback Mock Response
     setTimeout(() => {
       const response = getAIResponse(message);
       set(s => ({

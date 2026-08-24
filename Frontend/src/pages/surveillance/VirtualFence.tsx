@@ -4,19 +4,9 @@ import { useAppStore } from '../../store/appStore';
 import { FenceZone } from '../../types';
 import { PageHeader, SeverityBadge, Btn } from '../../components/common';
 
-const initialZones: FenceZone[] = [
-  { id: 'FZ-001', name: 'Zone A – North Perimeter', type: 'BOUNDARY', enabled: true, camera: 'CAM-001', alertCount: 3, lastTriggered: '2026-08-22T19:10:18', color: '#3b82f6' },
-  { id: 'FZ-002', name: 'Zone B – Restricted Inner', type: 'RESTRICTED', enabled: true, camera: 'CAM-002', alertCount: 1, lastTriggered: '2026-08-22T21:10:34', color: '#ef4444' },
-  { id: 'FZ-003', name: 'Zone C – Warning Buffer', type: 'WARNING', enabled: true, camera: 'CAM-001', alertCount: 5, lastTriggered: '2026-08-22T20:30:00', color: '#f59e0b' },
-  { id: 'FZ-004', name: 'Entry Gate Alpha', type: 'ENTRY', enabled: true, camera: 'CAM-004', alertCount: 0, color: '#10b981' },
-  { id: 'FZ-005', name: 'Exit Gate Bravo', type: 'EXIT', enabled: false, camera: 'CAM-005', alertCount: 0, color: '#10b981' },
-];
+const initialZones: FenceZone[] = [];
 
-const mockIntrusions = [
-  { id: 'INT-001', zone: 'Zone B – Restricted Inner', severity: 'CRITICAL' as const, time: '21:10:34', camera: 'CAM-002', description: 'Unauthorized person crossed Virtual Fence Zone B.' },
-  { id: 'INT-002', zone: 'Zone A – North Perimeter', severity: 'HIGH' as const, time: '19:10:18', camera: 'CAM-001', description: 'Two individuals crossed virtual boundary line.' },
-  { id: 'INT-003', zone: 'Zone C – Warning Buffer', severity: 'MEDIUM' as const, time: '20:30:00', camera: 'CAM-001', description: 'Person detected in warning zone without clearance.' },
-];
+const mockIntrusions: any[] = [];
 
 const FenceSurveillancePreview: React.FC<{ zones: FenceZone[] }> = ({ zones }) => {
   return (
@@ -93,11 +83,70 @@ const FenceSurveillancePreview: React.FC<{ zones: FenceZone[] }> = ({ zones }) =
 const VirtualFence: React.FC = () => {
   const { setCurrentPage } = useAppStore();
   const [zones, setZones] = useState<FenceZone[]>(initialZones);
+  const [events, setEvents] = useState<any[]>(mockIntrusions);
+  const [liveIntruder, setLiveIntruder] = useState<any | null>(null);
 
-  useEffect(() => { setCurrentPage('virtual-fence'); }, [setCurrentPage]);
+  useEffect(() => { 
+    setCurrentPage('virtual-fence'); 
+    
+    // Fetch initial state
+    fetch('http://localhost:8000/api/virtual-fence/zones')
+      .then(res => res.json())
+      .then(data => {
+        if (data.zones) setZones(data.zones);
+      })
+      .catch(err => console.error(err));
+      
+    fetch('http://localhost:8000/api/virtual-fence/events')
+      .then(res => res.json())
+      .then(data => {
+        if (data.events) {
+          setEvents(data.events.map((e: any) => ({
+            id: e.id,
+            zone: e.zone_name,
+            severity: e.severity,
+            time: new Date(e.timestamp).toLocaleTimeString(),
+            camera: e.camera_id,
+            description: e.reason
+          })));
+        }
+      })
+      .catch(err => console.error(err));
+      
+    // Subscribe to live events
+    const evtSource = new EventSource("http://localhost:8000/api/virtual-fence/stream");
+    evtSource.onmessage = (e) => {
+        const event = JSON.parse(e.data);
+        const newAlert = {
+            id: event.id,
+            zone: event.zone_name,
+            severity: event.severity,
+            time: new Date().toLocaleTimeString(),
+            camera: event.camera_id,
+            description: event.reason
+        };
+        
+        setEvents(prev => [newAlert, ...prev].slice(0, 50));
+        
+        // Show live intruder blip
+        setLiveIntruder({ zoneId: event.zone_id, text: event.person_name || 'INTRUDER' });
+        setTimeout(() => setLiveIntruder(null), 3000); // clear after 3s
+    };
+    
+    return () => {
+        evtSource.close();
+    };
+  }, [setCurrentPage]);
 
   const toggleZone = (id: string) => {
-    setZones(z => z.map(zone => zone.id === id ? { ...zone, enabled: !zone.enabled } : zone));
+    fetch(`http://localhost:8000/api/virtual-fence/zones/${id}/toggle`, { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.zone) {
+            setZones(z => z.map(zone => zone.id === id ? data.zone : zone));
+        }
+      })
+      .catch(err => console.error(err));
   };
 
   const typeColor: Record<string, string> = {
@@ -128,7 +177,8 @@ const VirtualFence: React.FC = () => {
               Recent Intrusion Alerts
             </h3>
             <div className="space-y-2">
-              {mockIntrusions.map(alert => (
+              {events.length === 0 && <p className="text-xs text-center p-4 text-gray-500">No recent alerts.</p>}
+              {events.map(alert => (
                 <div key={alert.id}
                   className="flex items-start gap-3 p-3 rounded-lg"
                   style={{

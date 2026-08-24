@@ -2,12 +2,17 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Moon, Activity, Eye, Clock, Camera, Play, Upload, Crosshair } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { PageHeader, StatCard } from '../../components/common';
+import { VideoPlayerControls } from '../../components/VideoPlayerControls';
 
-const SIMULATION_VIDEOS = [
-  '/res/night_video/istockphoto-1147398576-640_adpp_is.mp4',
-  '/res/night_video/istockphoto-1147423914-640_adpp_is.mp4',
-  '/res/night_video/istockphoto-684718024-640_adpp_is.mp4',
-];
+// Dynamically load all videos from the night_video folder
+const videoFiles = import.meta.glob('/public/res/night_video/*.mp4');
+const SIMULATION_VIDEOS = Object.keys(videoFiles).length > 0 
+  ? Object.keys(videoFiles).map(path => path.replace('/public', ''))
+  : [
+      '/res/night_video/istockphoto-1147398576-640_adpp_is.mp4',
+      '/res/night_video/istockphoto-1147423914-640_adpp_is.mp4',
+      '/res/night_video/istockphoto-684718024-640_adpp_is.mp4',
+    ];
 
 interface Detection {
   xmin: number;
@@ -16,6 +21,14 @@ interface Detection {
   ymax: number;
   confidence: number;
   class: string;
+}
+
+interface ActionDetection {
+  bbox: number[];
+  keypoints: number[][];
+  action: string;
+  action_confidence: number;
+  is_suspicious: boolean;
 }
 
 const NightSurveillance: React.FC = () => {
@@ -28,6 +41,7 @@ const NightSurveillance: React.FC = () => {
   const [isNightVision, setIsNightVision] = useState(true);
   const [fps, setFps] = useState(0);
   const [activeDetections, setActiveDetections] = useState<Detection[]>([]);
+  const [activeActions, setActiveActions] = useState<ActionDetection[]>([]);
   const [mediaSource, setMediaSource] = useState<'webcam'|'simulation'|'upload'|null>(null);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [processedImageUrl, setProcessedImageUrl] = useState<string | null>(null);
@@ -58,6 +72,8 @@ const NightSurveillance: React.FC = () => {
     setMediaSource('webcam');
     setVideoUrl('');
     setProcessedImageUrl(null);
+    setActiveDetections([]);
+    setActiveActions([]);
     if (videoRef.current) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -74,6 +90,8 @@ const NightSurveillance: React.FC = () => {
   const startSimulation = () => {
     stopWebcam();
     setProcessedImageUrl(null);
+    setActiveDetections([]);
+    setActiveActions([]);
     const randomVid = SIMULATION_VIDEOS[Math.floor(Math.random() * SIMULATION_VIDEOS.length)];
     setVideoUrl(randomVid);
     setMediaSource('simulation');
@@ -84,9 +102,14 @@ const NightSurveillance: React.FC = () => {
     if (file) {
       stopWebcam();
       setProcessedImageUrl(null);
+      setActiveDetections([]);
+      setActiveActions([]);
       setVideoUrl(URL.createObjectURL(file));
       setMediaSource('upload');
     }
+    
+    // Clear input so the user can upload the same file again without freezing
+    e.target.value = '';
   };
 
   const processFrame = useCallback(async () => {
@@ -131,6 +154,9 @@ const NightSurveillance: React.FC = () => {
           
           const formData = new FormData();
           formData.append('file', blob, 'frame.jpg');
+          if (useAppStore.getState().priorityMode) {
+              formData.append('priority_mode', 'true');
+          }
 
           try {
             const res = await fetch('http://127.0.0.1:8000/detect-night', {
@@ -141,6 +167,7 @@ const NightSurveillance: React.FC = () => {
             if (res.ok) {
               const data = await res.json();
               setActiveDetections(data.detections || []);
+              setActiveActions(data.actions || []);
               setAutoGreenDetect(!!data.is_already_green);
               if (data.image_base64) {
                 setProcessedImageUrl(`data:image/jpeg;base64,${data.image_base64}`);
@@ -165,6 +192,7 @@ const NightSurveillance: React.FC = () => {
       interval = window.setInterval(processFrame, 100);
     } else {
       setActiveDetections([]);
+      setActiveActions([]);
       setProcessedImageUrl(null);
       setFps(0);
     }
@@ -300,10 +328,57 @@ const NightSurveillance: React.FC = () => {
                                 </g>
                               )
                             })}
+
+                            {activeActions && activeActions.map((act, i) => {
+                              if (act.action === "Unknown") return null;
+                              
+                              const width = act.bbox[2] - act.bbox[0];
+                              const height = act.bbox[3] - act.bbox[1];
+                              const boxColor = act.is_suspicious ? 'rgba(234, 179, 8, 0.9)' : 'rgba(16, 185, 129, 0.6)';
+                              const fillColor = act.is_suspicious ? 'rgba(234, 179, 8, 0.15)' : 'rgba(16, 185, 129, 0.1)';
+                              const textBgColor = act.is_suspicious ? 'rgba(234, 179, 8, 0.95)' : 'rgba(16, 185, 129, 0.9)';
+                              
+                              return (
+                                <g key={`act-${i}`}>
+                                  <rect 
+                                    x={act.bbox[0]} y={act.bbox[1]} 
+                                    width={width} height={height} 
+                                    fill={fillColor} stroke={boxColor} strokeWidth="2"
+                                  />
+                                  <rect 
+                                    x={act.bbox[0]} y={act.bbox[3] - 16} 
+                                    width={width} height="16" 
+                                    fill={textBgColor}
+                                  />
+                                  <text 
+                                    x={act.bbox[0] + 2} y={act.bbox[3] - 4} 
+                                    fill="#fff" fontSize="10" fontWeight="bold" fontFamily="monospace"
+                                  >
+                                    ACT: {act.action.toUpperCase()} {(act.action_confidence * 100).toFixed(0)}%
+                                  </text>
+                                  
+                                  {act.keypoints && act.keypoints.map((kp, kIdx) => {
+                                    if (kp[2] < 0.5) return null;
+                                    return (
+                                      <circle 
+                                        key={kIdx} 
+                                        cx={kp[0]} cy={kp[1]} r="2" 
+                                        fill="#fde047" stroke="#000" strokeWidth="0.5"
+                                      />
+                                    );
+                                  })}
+                                </g>
+                              );
+                            })}
                           </svg>
                         );
                     })()}
                  </div>
+              )}
+
+              {/* Native Video Controls mapped to custom UI overlay */}
+              {(mediaSource === 'simulation' || mediaSource === 'upload') && videoRef.current && (
+                <VideoPlayerControls videoRef={videoRef as React.RefObject<HTMLVideoElement>} />
               )}
 
               {/* Hidden Canvas used for extraction */}

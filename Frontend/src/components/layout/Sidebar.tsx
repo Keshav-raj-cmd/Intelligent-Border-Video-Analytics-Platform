@@ -84,6 +84,18 @@ const SidebarGroup: React.FC<{
 }> = ({ group, collapsed }) => {
   const [open, setOpen] = useState(group.defaultOpen ?? true);
   const location = useLocation();
+  const priorityMode = useAppStore(s => s.priorityMode);
+  
+  const priorityPaths = ['/surveillance/human-face', '/surveillance/vehicle-anpr', '/surveillance/night', '/surveillance/thermal'];
+  
+  const isItemDisabled = (path: string) => {
+    if (!priorityMode) return false;
+    if (group.label === 'SURVEILLANCE' && !priorityPaths.includes(path)) {
+        return true;
+    }
+    return false;
+  };
+
   const hasActive = group.items.some(i =>
     i.path === '/' ? location.pathname === '/' : location.pathname.startsWith(i.path)
   );
@@ -92,15 +104,19 @@ const SidebarGroup: React.FC<{
     // In collapsed mode, show only icons
     return (
       <div className="mb-1">
-        {group.items.map(item => (
+        {group.items.map(item => {
+          const disabled = isItemDisabled(item.path);
+          return (
           <NavLink
             key={item.path}
-            to={item.path}
+            to={disabled ? '#' : item.path}
             end={item.path === '/'}
             title={item.label}
+            onClick={(e) => disabled && e.preventDefault()}
             className={({ isActive }) =>
               `flex items-center justify-center w-full h-9 rounded mx-auto my-0.5 transition-all duration-150 ${
-                isActive
+                disabled ? 'opacity-30 cursor-not-allowed' :
+                isActive && !disabled
                   ? 'bg-blue-600/20 text-blue-400'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
               }`
@@ -109,7 +125,7 @@ const SidebarGroup: React.FC<{
           >
             {item.icon}
           </NavLink>
-        ))}
+        )})}
       </div>
     );
   }
@@ -131,24 +147,28 @@ const SidebarGroup: React.FC<{
 
       {/* Items */}
       {open && (
-        <div className="space-y-0.5">
-          {group.items.map(item => (
+        <div className="mt-1 space-y-0.5">
+          {group.items.map(item => {
+            const disabled = isItemDisabled(item.path);
+            return (
             <NavLink
               key={item.path}
-              to={item.path}
+              to={disabled ? '#' : item.path}
               end={item.path === '/'}
+              onClick={(e) => disabled && e.preventDefault()}
               className={({ isActive }) =>
                 `flex items-center gap-2.5 px-3 py-2 mx-2 rounded text-sm transition-all duration-150 ${
-                  isActive
+                  disabled ? 'opacity-30 cursor-not-allowed' :
+                  isActive && !disabled
                     ? 'bg-blue-600/20 text-blue-300 font-medium'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
                 }`
               }
             >
-              <span className="shrink-0">{item.icon}</span>
+              <span className={`shrink-0 ${disabled ? '' : 'opacity-80'}`}>{item.icon}</span>
               <span className="truncate">{item.label}</span>
             </NavLink>
-          ))}
+          )})}
         </div>
       )}
     </div>

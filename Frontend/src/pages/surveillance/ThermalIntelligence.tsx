@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Thermometer, Target, Activity, Eye, Upload, Play, RefreshCw, Crosshair, Video } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { PageHeader, StatCard, StatusBadge } from '../../components/common';
+import { VideoPlayerControls } from '../../components/VideoPlayerControls';
 
 // The images available in the public/res folder for simulation
 const RES_IMAGES = [
@@ -27,10 +28,21 @@ interface Detection {
   class: string;
 }
 
+interface ActionDetection {
+  bbox: number[];
+  keypoints: number[][];
+  action: string;
+  action_confidence: number;
+  is_suspicious: boolean;
+}
+
 // Helper to send file to API
-const analyzeImage = async (fileOrBlob: Blob): Promise<Detection[]> => {
+const analyzeImage = async (fileOrBlob: Blob): Promise<{detections: Detection[], actions: ActionDetection[]}> => {
   const formData = new FormData();
   formData.append('file', fileOrBlob, 'image.jpg');
+  if (useAppStore.getState().priorityMode) {
+      formData.append('priority_mode', 'true');
+  }
 
   const res = await fetch('http://127.0.0.1:8000/detect', {
     method: 'POST',
@@ -39,7 +51,7 @@ const analyzeImage = async (fileOrBlob: Blob): Promise<Detection[]> => {
   
   if (!res.ok) throw new Error('API Error');
   const data = await res.json();
-  return data.detections || [];
+  return { detections: data.detections || [], actions: data.actions || [] };
 };
 
 // Reusable Camera Feed Component
@@ -49,12 +61,13 @@ const ThermalCameraFeed: React.FC<{
   mediaUrl: string | null; 
   mediaType: 'image' | 'video';
   detections: Detection[]; 
+  actions: ActionDetection[];
   isAnalyzing: boolean;
   onAction?: () => void;
   actionLabel?: React.ReactNode;
   children?: React.ReactNode;
   onFrameCapture?: (blob: Blob) => void;
-}> = ({ title, subtitle, mediaUrl, mediaType, detections, isAnalyzing, onAction, actionLabel, children, onFrameCapture }) => {
+}> = ({ title, subtitle, mediaUrl, mediaType, detections, actions, isAnalyzing, onAction, actionLabel, children, onFrameCapture }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mediaRef = useRef<HTMLImageElement | HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -224,6 +237,59 @@ const ThermalCameraFeed: React.FC<{
               );
             })}
 
+            {/* Draw Actions / Poses */}
+            {actions && actions.map((act, i) => {
+              if (act.action === "Unknown") return null;
+              
+              const left = offset.x + (act.bbox[0] * scale.x);
+              const top = offset.y + (act.bbox[1] * scale.y);
+              const width = (act.bbox[2] - act.bbox[0]) * scale.x;
+              const height = (act.bbox[3] - act.bbox[1]) * scale.y;
+              
+              return (
+                <div 
+                  key={`act-${i}`}
+                  className="absolute border-2 pointer-events-none transition-all duration-300"
+                  style={{
+                    left: `${left}px`,
+                    top: `${top}px`,
+                    width: `${width}px`,
+                    height: `${height}px`,
+                    borderColor: act.is_suspicious ? 'rgba(234, 179, 8, 0.9)' : 'rgba(16, 185, 129, 0.6)',
+                    backgroundColor: act.is_suspicious ? 'rgba(234, 179, 8, 0.15)' : 'rgba(16, 185, 129, 0.1)',
+                  }}
+                >
+                  <div 
+                    className="absolute bottom-0 left-[-2px] px-2 py-0.5 text-[10px] font-bold whitespace-nowrap rounded-tr-sm transition-all duration-300"
+                    style={{
+                      backgroundColor: act.is_suspicious ? 'rgba(234, 179, 8, 0.95)' : 'rgba(16, 185, 129, 0.9)',
+                      color: '#fff',
+                      letterSpacing: '0.5px'
+                    }}
+                  >
+                    <div className="flex items-center gap-1">
+                      <Activity size={10} />
+                      {act.action.toUpperCase()} {(act.action_confidence * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                  
+                  {/* Draw 2D Skeleton (Keypoints) */}
+                  {act.keypoints && act.keypoints.map((kp, kIdx) => {
+                    const x = offset.x + (kp[0] * scale.x) - left;
+                    const y = offset.y + (kp[1] * scale.y) - top;
+                    if (kp[2] < 0.5) return null; // Only draw confident keypoints
+                    return (
+                       <div 
+                         key={kIdx} 
+                         className="absolute w-1.5 h-1.5 bg-yellow-300 rounded-full"
+                         style={{ left: `${x}px`, top: `${y}px`, transform: 'translate(-50%, -50%)' }}
+                       />
+                    );
+                  })}
+                </div>
+              );
+            })}
+
             {mediaType === 'image' && isAnalyzing && (
               <div className="absolute inset-0 flex items-center justify-center backdrop-blur-[1px]" style={{ background: 'rgba(0,0,0,0.4)' }}>
                 <div className="flex flex-col items-center gap-3">
@@ -238,6 +304,11 @@ const ThermalCameraFeed: React.FC<{
                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
                  <span className="text-[10px] font-bold text-red-500 tracking-wider bg-black/50 px-2 py-0.5 rounded">LIVE INFERENCE</span>
               </div>
+            )}
+            
+            {/* Native Video Controls mapped to custom UI overlay */}
+            {mediaType === 'video' && mediaRef.current && (
+              <VideoPlayerControls videoRef={mediaRef as React.RefObject<HTMLVideoElement>} />
             )}
           </>
         ) : (
@@ -259,17 +330,19 @@ const ThermalCameraFeed: React.FC<{
 const ThermalIntelligence: React.FC = () => {
   const { setCurrentPage } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   // State for Simulated Feed
   const [simUrl, setSimUrl] = useState<string | null>(null);
   const [simType, setSimType] = useState<'image' | 'video'>('image');
   const [simDetections, setSimDetections] = useState<Detection[]>([]);
-  const [isSimulating, setIsSimulating] = useState(false);
+  const [simActions, setSimActions] = useState<ActionDetection[]>([]);
 
   // State for Upload Feed
   const [upUrl, setUpUrl] = useState<string | null>(null);
   const [upType, setUpType] = useState<'image' | 'video'>('image');
   const [upDetections, setUpDetections] = useState<Detection[]>([]);
+  const [upActions, setUpActions] = useState<ActionDetection[]>([]);
+  
+  const [isSimulating, setIsSimulating] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
   // Frame processing ref so we don't overlap fetch calls for video
@@ -278,6 +351,7 @@ const ThermalIntelligence: React.FC = () => {
 
   // Combined targets for the grid below
   const activeTargets = [...simDetections, ...upDetections];
+  const activeActions = [...simActions, ...upActions];
 
   useEffect(() => { setCurrentPage('thermal-intelligence'); }, [setCurrentPage]);
 
@@ -300,8 +374,9 @@ const ThermalIntelligence: React.FC = () => {
       try {
         const response = await fetch(randomImg);
         const blob = await response.blob();
-        const det = await analyzeImage(blob);
+        const { detections: det, actions: act } = await analyzeImage(blob);
         setSimDetections(det);
+        setSimActions(act);
       } catch (err) {
         console.error("Simulation failed:", err);
       } finally {
@@ -314,8 +389,9 @@ const ThermalIntelligence: React.FC = () => {
     if (isProcessingSimFrame.current) return;
     isProcessingSimFrame.current = true;
     try {
-      const det = await analyzeImage(blob);
+      const { detections: det, actions: act } = await analyzeImage(blob);
       setSimDetections(det);
+      setSimActions(act);
     } catch (err) {
       console.error(err);
     } finally {
@@ -338,26 +414,33 @@ const ThermalIntelligence: React.FC = () => {
       // For video, the frame extractor loop takes over.
     } else {
       try {
-        const det = await analyzeImage(file);
+        const { detections: det, actions: act } = await analyzeImage(file);
         setUpDetections(det);
+        setUpActions(act);
       } catch (err) {
         console.error("Upload analysis failed:", err);
       } finally {
         setIsUploading(false);
       }
     }
+    
+    // Clear input so the user can upload the same file again without freezing
+    e.target.value = '';
   };
 
   const handleUploadVideoFrame = async (blob: Blob) => {
     if (isProcessingUpFrame.current) return;
     isProcessingUpFrame.current = true;
     try {
-      const det = await analyzeImage(blob);
+      const { detections: det, actions: act } = await analyzeImage(blob);
       setUpDetections(det);
+      setUpActions(act);
     } catch (err) {
       console.error(err);
     } finally {
       isProcessingUpFrame.current = false;
+      // Once the first video frame is processed, clear the uploading status so it shows LIVE
+      setIsUploading(false);
     }
   };
 
@@ -390,6 +473,7 @@ const ThermalIntelligence: React.FC = () => {
               mediaUrl={simUrl}
               mediaType={simType}
               detections={simDetections}
+              actions={simActions}
               isAnalyzing={isSimulating}
               onAction={handleSimulateRandom}
               actionLabel={<><Play size={14} /> PLAY RANDOM</>}
@@ -412,6 +496,7 @@ const ThermalIntelligence: React.FC = () => {
               mediaUrl={upUrl}
               mediaType={upType}
               detections={upDetections}
+              actions={upActions}
               isAnalyzing={isUploading}
               onAction={() => fileInputRef.current?.click()}
               actionLabel={<><Upload size={14} /> UPLOAD FILE</>}

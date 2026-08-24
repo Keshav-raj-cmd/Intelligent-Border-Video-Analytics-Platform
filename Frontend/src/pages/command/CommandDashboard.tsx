@@ -229,6 +229,31 @@ const CommandDashboard: React.FC = () => {
     <div className="flex h-full" style={{ maxHeight: 'calc(100vh - 56px)' }}>
       {/* ── Main Dashboard Content ── */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      
+        {/* ── Priority Mode Toggle ── */}
+        <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)' }}>
+          <div className="flex items-center gap-3">
+            <Zap size={20} style={{ color: useAppStore(s => s.priorityMode) ? '#3b82f6' : 'var(--color-text-muted)' }} />
+            <div>
+              <h3 className="text-sm font-bold text-blue-400">AI Priority Mode</h3>
+              <p className="text-xs text-blue-200 opacity-80">
+                Disable background analytic modules to focus maximum compute resources on <strong>Face, ANPR, Night, and Thermal</strong>.
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => useAppStore.getState().togglePriorityMode()}
+            className="px-4 py-1.5 rounded text-xs font-bold transition-colors"
+            style={{ 
+              background: useAppStore(s => s.priorityMode) ? '#3b82f6' : 'var(--color-bg-elevated)',
+              color: useAppStore(s => s.priorityMode) ? '#fff' : 'var(--color-text-primary)',
+              border: '1px solid',
+              borderColor: useAppStore(s => s.priorityMode) ? '#3b82f6' : 'var(--color-border)'
+            }}
+          >
+            {useAppStore(s => s.priorityMode) ? 'ENABLED' : 'DISABLED'}
+          </button>
+        </div>
 
         {/* ── Stat Cards Row ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

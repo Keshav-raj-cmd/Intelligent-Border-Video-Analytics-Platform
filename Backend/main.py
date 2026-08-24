@@ -11,22 +11,51 @@ import base64
 import threading
 import time
 import json
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
+
+# --- PyTorch 2.6 weights_only=True bypass for Ultralytics ---
+import torch
+_original_load = torch.load
+def _patched_load(*args, **kwargs):
+    if 'weights_only' not in kwargs:
+        kwargs['weights_only'] = False
+    return _original_load(*args, **kwargs)
+torch.load = _patched_load
+# -----------------------------------------------------------
+
+import asyncio
+import base64
+import pandas as pd
+import io
 from ultralytics import YOLO
 from huggingface_hub import hf_hub_download
 from supervision import Detections
 from pydantic import BaseModel
-import pandas as pd
-import io
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+gemini_client = None
+if os.getenv("GEMINI_API_KEY"):
+    try:
+        from google import genai
+        from google.genai import types
+        gemini_client = genai.Client()
+    except ImportError:
+        print("google-genai is not installed")
 
 # --- Local Face & ANPR Engine Integration ---
 from database import register_face, get_face_info, get_all_features, get_all_vehicles, register_vehicle, log_anpr_event
 from face_engine import face_engine
-from anpr_engine import extract_license_plate, get_db_vehicle
+from virtual_fence.routes import router as virtual_fence_router
 
 app = FastAPI(title="Thermal Human Detection API")
+app.include_router(virtual_fence_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -86,10 +115,33 @@ class ImageEnhancer:
         except Exception:
             return frame
 
+class ChatRequest(BaseModel):
+    message: str
+
+@app.post("/api/chat")
+async def api_chat(req: ChatRequest):
+    if not gemini_client:
+        return JSONResponse(status_code=500, content={"error": "Gemini API key not configured or sdk missing"})
+    
+    try:
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=req.message,
+            config=types.GenerateContentConfig(
+                system_instruction="You are the IBVAP AI Assistant. Reply in normal plain text instead of markdown. Do not use any bolding, asterisks, or formatting. Restrict your answers strictly to the defence and surveillance system. Do not answer general knowledge questions outside of this domain. If asked outside this scope, politely decline."
+            )
+        )
+        return {"reply": response.text}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 enhancer = ImageEnhancer()
 
 @app.post("/detect")
-async def detect(file: UploadFile = File(...)):
+async def detect(
+    file: UploadFile = File(...),
+    priority_mode: bool = Form(False)
+):
     try:
         contents = await file.read()
         
@@ -100,7 +152,7 @@ async def detect(file: UploadFile = File(...)):
         if cv_image is None:
             return JSONResponse(status_code=400, content={"error": "Failed to decode image"})
         
-        # Run inference
+        # Run inference (default imgsz=640 for accuracy)
         model_output = model(cv_image, conf=0.6, verbose=False)
         result = model_output[0]
         
@@ -109,6 +161,7 @@ async def detect(file: UploadFile = File(...)):
         
         # Parse results for JSON response
         detections = []
+        valid_boxes = []
         for i in range(len(sv_detections.xyxy)):
             x1, y1, x2, y2 = sv_detections.xyxy[i].tolist()
             conf = float(sv_detections.confidence[i])
@@ -116,6 +169,8 @@ async def detect(file: UploadFile = File(...)):
             
             # Using model's names dictionary if it has one, otherwise fallback to "human"
             class_name = result.names[cls_id] if hasattr(result, 'names') and cls_id in result.names else str(cls_id)
+            
+            valid_boxes.append([x1, y1, x2, y2])
             
             detections.append({
                 "xmin": x1,
@@ -125,14 +180,23 @@ async def detect(file: UploadFile = File(...)):
                 "confidence": conf,
                 "class": class_name
             })
+            
+        # Give priority to other detections first, then run BERT (action recognizer) using those valid boxes
+        if len(valid_boxes) > 0 and not priority_mode:
+            action_results = action_recognizer.detect_and_recognize(cv_image, valid_boxes)
+        else:
+            action_results = []
         
-        return JSONResponse(content={"detections": detections})
+        return JSONResponse(content={"detections": detections, "actions": action_results})
     
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/detect-night")
-async def detect_night(file: UploadFile = File(...)):
+async def detect_night(
+    file: UploadFile = File(...),
+    priority_mode: bool = Form(False)
+):
     try:
         contents = await file.read()
         
@@ -152,18 +216,21 @@ async def detect_night(file: UploadFile = File(...)):
         # Apply CLAHE enhancement
         enhanced_image = enhancer.enhance(cv_image)
         
-        # Run inference on enhanced image using general purpose YOLOv8n
+        # Run inference on enhanced image using general purpose YOLOv8n (default imgsz=640 for accuracy)
         model_output = model_night(enhanced_image, conf=0.4, verbose=False)
         result = model_output[0]
         
         sv_detections = Detections.from_ultralytics(result)
         
         detections = []
+        valid_boxes = []
         for i in range(len(sv_detections.xyxy)):
             x1, y1, x2, y2 = sv_detections.xyxy[i].tolist()
             conf = float(sv_detections.confidence[i])
             cls_id = int(sv_detections.class_id[i])
             class_name = result.names[cls_id] if hasattr(result, 'names') and cls_id in result.names else str(cls_id)
+            
+            valid_boxes.append([x1, y1, x2, y2])
             
             detections.append({
                 "xmin": x1,
@@ -174,11 +241,17 @@ async def detect_night(file: UploadFile = File(...)):
                 "class": class_name
             })
             
+        # Action Recognition & Pose (MotionBERT via Microservice)
+        if len(valid_boxes) > 0 and not priority_mode:
+            action_results = action_recognizer.detect_and_recognize(enhanced_image, valid_boxes)
+        else:
+            action_results = []
+            
         # Encode enhanced image to base64
         _, buffer = cv2.imencode('.jpg', enhanced_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
         img_base64 = base64.b64encode(buffer).decode('utf-8')
         
-        return JSONResponse(content={"detections": detections, "image_base64": img_base64, "is_already_green": is_already_green})
+        return JSONResponse(content={"detections": detections, "image_base64": img_base64, "is_already_green": is_already_green, "actions": action_results})
     
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -212,6 +285,13 @@ async def api_face_recognize(file: UploadFile = File(...)):
         # Decode image
         nparr = np.frombuffer(contents, np.uint8)
         img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # Resize image to max width of 640 for faster inference
+        MAX_WIDTH = 640
+        h, w = img_bgr.shape[:2]
+        if w > MAX_WIDTH:
+            scale = MAX_WIDTH / w
+            img_bgr = cv2.resize(img_bgr, (MAX_WIDTH, int(h * scale)))
         
         # Get all registered features
         db_features = get_all_features()
@@ -310,6 +390,13 @@ async def poll_ipcam():
         # Copy to avoid race conditions
         img_bgr = ipcam_latest_frame.copy()
         
+        # Resize image to max width of 640 for faster inference
+        MAX_WIDTH = 640
+        h, w = img_bgr.shape[:2]
+        if w > MAX_WIDTH:
+            scale = MAX_WIDTH / w
+            img_bgr = cv2.resize(img_bgr, (MAX_WIDTH, int(h * scale)))
+        
         # Get all registered features
         db_features = get_all_features()
         
@@ -355,8 +442,10 @@ async def poll_ipcam():
 @app.get("/api/anpr/registry")
 async def api_anpr_registry():
     try:
+        from database import get_all_vehicles, get_all_suspicious_vehicles
         vehicles = get_all_vehicles()
-        return JSONResponse(content={"vehicles": vehicles})
+        suspicious = get_all_suspicious_vehicles()
+        return JSONResponse(content={"vehicles": vehicles, "suspicious_vehicles": suspicious})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -399,54 +488,91 @@ async def api_anpr_upload(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-from collections import defaultdict
-plate_history = defaultdict(int)
+from services.vehicle_tracker import VehicleTracker
+from services.plate_detector import PlateDetector
+from utils.image_preprocessor import ImagePreprocessor
+from services.plate_ocr import PlateOCR
+from services.temporal_consensus import TemporalConsensus
+from services.watchlist_service import WatchlistService
+from services.risk_engine import RiskEngine
+from services.event_service import EventService
+from services.action_recognizer import ActionRecognizer
+
+# Initialize modular services
+plate_detector = PlateDetector()
+plate_ocr = PlateOCR()
+temporal_consensus = TemporalConsensus(min_confirmations=3, timeout_seconds=15.0)
+event_service = EventService(cooldown_seconds=60)
+action_recognizer = ActionRecognizer()
 
 def process_anpr_frame(img_bgr):
-    # Detect cars using general YOLO model
-    results = model_night(img_bgr, conf=0.4, verbose=False)
-    result = results[0]
-    sv_detections = Detections.from_ultralytics(result)
+    # Detect and track vehicles using YOLO ByteTrack
+    results = VehicleTracker.track_vehicles(model_night, img_bgr, conf=0.4)
     
-    db_vehicles = get_all_vehicles()
     detections = []
     
-    for i in range(len(sv_detections.xyxy)):
-        cls_id = int(sv_detections.class_id[i])
-        class_name = result.names[cls_id] if hasattr(result, 'names') and cls_id in result.names else str(cls_id)
+    # Process each tracked vehicle
+    if results.boxes is None or len(results.boxes) == 0:
+        return detections
         
-        # Only process vehicles (car, motorcycle, bus, truck)
+    for i, box in enumerate(results.boxes):
+        cls_id = int(box.cls[0])
+        class_name = results.names[cls_id] if hasattr(results, 'names') and cls_id in results.names else str(cls_id)
+        
+        # Only process vehicles
         if class_name not in ['car', 'motorcycle', 'bus', 'truck']:
             continue
             
-        x1, y1, x2, y2 = map(int, sv_detections.xyxy[i].tolist())
-        conf = float(sv_detections.confidence[i])
+        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+        conf = float(box.conf[0])
         
-        # Extract plate text
-        plate_text = extract_license_plate(img_bgr, x1, y1, x2, y2)
+        # ByteTrack assigns an ID; if not assigned, generate a temporary one based on bbox
+        track_id = int(box.id[0]) if box.id is not None else hash(f"{x1}{y1}")
         
-        database_info = None
-        display_text = plate_text
+        vehicle_bbox = (x1, y1, x2, y2)
         
-        if plate_text:
-            database_info = get_db_vehicle(plate_text, db_vehicles)
-            plate_history[plate_text] += 1
+        # 1. Plate Detection
+        plate_bbox = plate_detector.detect_plate(img_bgr, vehicle_bbox)
+        px1, py1, px2, py2 = plate_bbox
+        plate_crop = img_bgr[max(0, py1):py2, max(0, px1):px2]
+        
+        # 2. Image Preprocessing
+        enhanced_crop = ImagePreprocessor.apply_pipeline(plate_crop, profile="adaptive_threshold")
+        
+        # 3. OCR
+        raw_text, ocr_conf = plate_ocr.read_plate(enhanced_crop)
+        
+        # 4. Temporal Consensus
+        temporal_consensus.add_reading(track_id, raw_text, ocr_conf)
+        best_plate, temporal_conf, is_stable = temporal_consensus.get_consensus(track_id)
+        
+        display_text = best_plate if best_plate else (raw_text or "")
+        risk_level = "NORMAL"
+        is_suspected = False
+        
+        if best_plate:
+            # 5. Fuzzy Matching & Watchlist Check
+            match_data, match_type, source = WatchlistService.match_plate(best_plate)
             
-            # Stabilize: It is stable IF it's a DB match OR we've seen it 2+ times
-            is_stable = (database_info is not None) or (plate_history[plate_text] >= 2)
+            # 6. Risk Engine
+            risk_level, risk_score = RiskEngine.calculate_risk(match_data, match_type, source, temporal_conf, is_stable)
             
-            if is_stable:
-                if database_info:
-                    display_text = database_info['plate_number']
+            if match_data and match_type in ['EXACT_MATCH', 'HIGH_CONFIDENCE_MATCH']:
+                display_text = match_data['plate_number']
                 
-                # Log on first time it becomes stable
-                if (database_info and plate_history[plate_text] == 1) or (not database_info and plate_history[plate_text] == 2):
-                    is_suspected = database_info['flagged'] if database_info else False
-                    log_anpr_event(display_text, is_suspected)
-            else:
-                display_text = plate_text + " (Stabilizing...)"
+            is_suspected = risk_level in ['HIGH', 'CRITICAL']
+            
+            # 7. Alert & Event Logging
+            if is_stable or match_type in ['EXACT_MATCH', 'HIGH_CONFIDENCE_MATCH']:
+                is_new_alert, event_data = event_service.process_event(
+                    track_id, best_plate, class_name, match_data, match_type, risk_level, risk_score, img_bgr, vehicle_bbox, plate_bbox
+                )
+            
+            if not is_stable and match_type not in ['EXACT_MATCH', 'HIGH_CONFIDENCE_MATCH']:
+                display_text = display_text + " (Stabilizing...)"
         
         detections.append({
+            "track_id": track_id,
             "class": class_name,
             "confidence": conf,
             "xmin": x1,
@@ -454,8 +580,10 @@ def process_anpr_frame(img_bgr):
             "xmax": x2,
             "ymax": y2,
             "plate_text": display_text,
-            "database_info": database_info
+            "is_suspected": is_suspected,
+            "risk_level": risk_level
         })
+        
     return detections
 
 @app.post("/api/anpr/recognize")
