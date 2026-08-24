@@ -13,13 +13,59 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS known_faces (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            subject_name TEXT UNIQUE NOT NULL,
+            subject_name TEXT PRIMARY KEY,
             additional_info TEXT,
             photo_base64 TEXT,
             feature_vector BLOB
         )
     ''')
+    
+    # --- ANPR / Vehicles Table ---
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS registered_vehicles (
+            plate_number TEXT PRIMARY KEY,
+            model TEXT,
+            color TEXT,
+            owner_name TEXT,
+            status TEXT,
+            warrants TEXT,
+            flagged BOOLEAN
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS anpr_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plate_number TEXT,
+            is_suspected BOOLEAN,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+    
+    seed_dummy_vehicles()
+
+def seed_dummy_vehicles():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    dummy_data = [
+        ("DL 3C CQ 1234", "Maruti Suzuki Dzire", "White", "Rajesh Kumar", "CLEAN", "None", False),
+        ("HR 26 DK 5678", "Mahindra XUV500", "Silver", "Amit Singh", "WANTED", "Robbery Suspect", True),
+        ("KA 03 MS 9012", "Hyundai Elite i20", "Red", "Priya Sharma", "CLEAN", "None", False),
+        ("HR 26 DK 5679", "Maruti Suzuki Swift", "Red", "Vikram Rathore", "STOLEN", "Reported stolen on 12th Aug", True),
+        ("DL 10 CE 7890", "Maruti Suzuki Ciaz", "Grey", "Neha Gupta", "CLEAN", "None", False),
+        ("HR 51 BQ 3456", "Mahindra XUV500", "White", "Suresh Menon", "CLEAN", "None", False),
+        ("DL 2C AT 6789", "Mercedes-Benz E-Class", "Black", "Karan Johar", "FLAGGED", "VIP Escort needed", True),
+    ]
+    
+    for v in dummy_data:
+        cursor.execute('''
+            INSERT OR IGNORE INTO registered_vehicles (plate_number, model, color, owner_name, status, warrants, flagged)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', v)
+        
     conn.commit()
     conn.close()
 
@@ -86,3 +132,39 @@ def get_all_features():
     for row in rows:
         features_dict[row[0]] = row[1]
     return features_dict
+
+# --- Vehicle Registration Functions ---
+def register_vehicle(plate_number, model, color, owner_name, status, warrants, flagged):
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO registered_vehicles (plate_number, model, color, owner_name, status, warrants, flagged)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(plate_number) DO UPDATE SET
+        model=excluded.model, color=excluded.color, owner_name=excluded.owner_name,
+        status=excluded.status, warrants=excluded.warrants, flagged=excluded.flagged
+    ''', (plate_number, model, color, owner_name, status, warrants, flagged))
+    conn.commit()
+    conn.close()
+
+def get_all_vehicles():
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM registered_vehicles')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def log_anpr_event(plate_number: str, is_suspected: bool):
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO anpr_events (plate_number, is_suspected)
+        VALUES (?, ?)
+    ''', (plate_number, is_suspected))
+    conn.commit()
+    conn.close()

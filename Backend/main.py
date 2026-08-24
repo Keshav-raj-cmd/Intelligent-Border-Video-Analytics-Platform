@@ -18,10 +18,13 @@ from ultralytics import YOLO
 from huggingface_hub import hf_hub_download
 from supervision import Detections
 from pydantic import BaseModel
+import pandas as pd
+import io
 
-# --- Local Face Engine Integration ---
-from database import register_face, get_face_info, get_all_features
+# --- Local Face & ANPR Engine Integration ---
+from database import register_face, get_face_info, get_all_features, get_all_vehicles, register_vehicle, log_anpr_event
 from face_engine import face_engine
+from anpr_engine import extract_license_plate, get_db_vehicle
 
 app = FastAPI(title="Thermal Human Detection API")
 
@@ -336,6 +339,152 @@ async def poll_ipcam():
             })
             
         # Encode frame to base64 JPEG to return to frontend
+        _, buffer = cv2.imencode('.jpg', img_bgr)
+        frame_b64 = base64.b64encode(buffer).decode('utf-8')
+        
+        return JSONResponse(content={
+            "detections": detections, 
+            "frame_base64": frame_b64,
+            "frame_width": img_bgr.shape[1],
+            "frame_height": img_bgr.shape[0]
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e), "detections": [], "frame_base64": None})
+
+# --- ANPR API Endpoints ---
+@app.get("/api/anpr/registry")
+async def api_anpr_registry():
+    try:
+        vehicles = get_all_vehicles()
+        return JSONResponse(content={"vehicles": vehicles})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/anpr/register")
+async def api_anpr_register(
+    plate_number: str = Form(...),
+    model: str = Form("Unknown"),
+    color: str = Form("Unknown"),
+    owner_name: str = Form("Unknown"),
+    status: str = Form("CLEAN"),
+    warrants: str = Form("None"),
+    flagged: bool = Form(False)
+):
+    try:
+        register_vehicle(plate_number, model, color, owner_name, status, warrants, flagged)
+        return JSONResponse(content={"status": "success", "plate_number": plate_number})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/anpr/upload")
+async def api_anpr_upload(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+            
+        for _, row in df.iterrows():
+            register_vehicle(
+                str(row.get('plate_number', '')),
+                str(row.get('model', 'Unknown')),
+                str(row.get('color', 'Unknown')),
+                str(row.get('owner_name', 'Unknown')),
+                str(row.get('status', 'CLEAN')),
+                str(row.get('warrants', 'None')),
+                bool(row.get('flagged', False))
+            )
+        return JSONResponse(content={"status": "success", "count": len(df)})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+from collections import defaultdict
+plate_history = defaultdict(int)
+
+def process_anpr_frame(img_bgr):
+    # Detect cars using general YOLO model
+    results = model_night(img_bgr, conf=0.4, verbose=False)
+    result = results[0]
+    sv_detections = Detections.from_ultralytics(result)
+    
+    db_vehicles = get_all_vehicles()
+    detections = []
+    
+    for i in range(len(sv_detections.xyxy)):
+        cls_id = int(sv_detections.class_id[i])
+        class_name = result.names[cls_id] if hasattr(result, 'names') and cls_id in result.names else str(cls_id)
+        
+        # Only process vehicles (car, motorcycle, bus, truck)
+        if class_name not in ['car', 'motorcycle', 'bus', 'truck']:
+            continue
+            
+        x1, y1, x2, y2 = map(int, sv_detections.xyxy[i].tolist())
+        conf = float(sv_detections.confidence[i])
+        
+        # Extract plate text
+        plate_text = extract_license_plate(img_bgr, x1, y1, x2, y2)
+        
+        database_info = None
+        display_text = plate_text
+        
+        if plate_text:
+            database_info = get_db_vehicle(plate_text, db_vehicles)
+            plate_history[plate_text] += 1
+            
+            # Stabilize: It is stable IF it's a DB match OR we've seen it 2+ times
+            is_stable = (database_info is not None) or (plate_history[plate_text] >= 2)
+            
+            if is_stable:
+                if database_info:
+                    display_text = database_info['plate_number']
+                
+                # Log on first time it becomes stable
+                if (database_info and plate_history[plate_text] == 1) or (not database_info and plate_history[plate_text] == 2):
+                    is_suspected = database_info['flagged'] if database_info else False
+                    log_anpr_event(display_text, is_suspected)
+            else:
+                display_text = plate_text + " (Stabilizing...)"
+        
+        detections.append({
+            "class": class_name,
+            "confidence": conf,
+            "xmin": x1,
+            "ymin": y1,
+            "xmax": x2,
+            "ymax": y2,
+            "plate_text": display_text,
+            "database_info": database_info
+        })
+    return detections
+
+@app.post("/api/anpr/recognize")
+async def api_anpr_recognize(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        detections = process_anpr_frame(img_bgr)
+        return JSONResponse(content={
+            "detections": detections,
+            "frame_width": img_bgr.shape[1],
+            "frame_height": img_bgr.shape[0]
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.get("/api/anpr/ipcam/poll")
+async def poll_anpr_ipcam():
+    global ipcam_latest_frame
+    
+    if ipcam_latest_frame is None:
+        return JSONResponse(status_code=503, content={"error": "No frame available yet", "detections": [], "frame_base64": None})
+        
+    try:
+        img_bgr = ipcam_latest_frame.copy()
+        detections = process_anpr_frame(img_bgr)
+        
         _, buffer = cv2.imencode('.jpg', img_bgr)
         frame_b64 = base64.b64encode(buffer).decode('utf-8')
         
