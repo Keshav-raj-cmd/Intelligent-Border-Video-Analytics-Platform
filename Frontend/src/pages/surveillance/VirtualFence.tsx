@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Plus, Edit2, Trash2, Power, PowerOff, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Shield, Plus, Edit2, Trash2, Power, PowerOff, AlertTriangle, CheckCircle, Upload, Play, Loader } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { FenceZone } from '../../types';
 import { PageHeader, SeverityBadge, Btn } from '../../components/common';
@@ -8,10 +8,20 @@ const initialZones: FenceZone[] = [];
 
 const mockIntrusions: any[] = [];
 
-const FenceSurveillancePreview: React.FC<{ zones: FenceZone[] }> = ({ zones }) => {
+const FenceSurveillancePreview: React.FC<{ zones: FenceZone[], activeVideo?: any, isPlaying?: boolean }> = ({ zones, activeVideo, isPlaying }) => {
   return (
-    <div className="relative w-full rounded-lg overflow-hidden camera-feed" style={{ height: '340px' }}>
-      <div className="scan-line" />
+    <div className="relative w-full rounded-lg overflow-hidden camera-feed bg-black" style={{ height: '400px' }}>
+      {isPlaying && activeVideo ? (
+          <video 
+              src={`http://localhost:8000/api/virtual-fence/videos/${activeVideo.video_id}/play`}
+              autoPlay 
+              loop
+              muted
+              className="absolute inset-0 w-full h-full object-cover"
+          />
+      ) : (
+          <div className="scan-line" />
+      )}
       {/* Grid overlay */}
       <div className="absolute inset-0 opacity-5" style={{
         backgroundImage: 'linear-gradient(rgba(255,255,255,0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.2) 1px, transparent 1px)',
@@ -64,18 +74,20 @@ const FenceSurveillancePreview: React.FC<{ zones: FenceZone[] }> = ({ zones }) =
       <div className="absolute top-3 right-3 text-xs px-2 py-0.5 rounded font-mono"
         style={{ background: 'rgba(0,0,0,0.7)', color: '#94a3b8', fontSize: '9px' }}>BOP NORTH – VIRTUAL FENCE VIEW</div>
 
-      {/* Simulated intrusion person */}
-      <div className="absolute" style={{ left: '35%', top: '38%', width: '4%', height: '10%' }}>
-        <div className="w-full h-full" style={{
-          background: 'rgba(239,68,68,0.4)',
-          boxShadow: '0 0 8px rgba(239,68,68,0.6)',
-          borderRadius: '2px',
-        }} />
-        <div className="absolute -top-4 -left-2 text-xs px-1 rounded"
-          style={{ background: 'rgba(239,68,68,0.85)', color: '#fff', fontSize: '8px', whiteSpace: 'nowrap' }}>
-          INTRUDER
-        </div>
-      </div>
+      {/* Simulated intrusion person ONLY if not playing a real video */}
+      {!isPlaying && (
+          <div className="absolute" style={{ left: '35%', top: '38%', width: '4%', height: '10%' }}>
+            <div className="w-full h-full" style={{
+              background: 'rgba(239,68,68,0.4)',
+              boxShadow: '0 0 8px rgba(239,68,68,0.6)',
+              borderRadius: '2px',
+            }} />
+            <div className="absolute -top-4 -left-2 text-xs px-1 rounded"
+              style={{ background: 'rgba(239,68,68,0.85)', color: '#fff', fontSize: '8px', whiteSpace: 'nowrap' }}>
+              INTRUDER
+            </div>
+          </div>
+      )}
     </div>
   );
 };
@@ -85,6 +97,13 @@ const VirtualFence: React.FC = () => {
   const [zones, setZones] = useState<FenceZone[]>(initialZones);
   const [events, setEvents] = useState<any[]>(mockIntrusions);
   const [liveIntruder, setLiveIntruder] = useState<any | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [activeVideo, setActiveVideo] = useState<any>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => { 
     setCurrentPage('virtual-fence'); 
@@ -117,26 +136,109 @@ const VirtualFence: React.FC = () => {
     const evtSource = new EventSource("http://localhost:8000/api/virtual-fence/stream");
     evtSource.onmessage = (e) => {
         const event = JSON.parse(e.data);
-        const newAlert = {
-            id: event.id,
-            zone: event.zone_name,
-            severity: event.severity,
-            time: new Date().toLocaleTimeString(),
-            camera: event.camera_id,
-            description: event.reason
-        };
-        
-        setEvents(prev => [newAlert, ...prev].slice(0, 50));
-        
-        // Show live intruder blip
-        setLiveIntruder({ zoneId: event.zone_id, text: event.person_name || 'INTRUDER' });
-        setTimeout(() => setLiveIntruder(null), 3000); // clear after 3s
+        if (event.type === "VIDEO_ANALYSIS_PROGRESS") {
+            setAnalyzing(true);
+            setProgress(event.progress);
+        } else if (event.type === "ZONE_SUGGESTIONS_READY") {
+            setAnalyzing(false);
+            setProgress(100);
+            fetchSuggestions(event.video_id);
+        } else if (event.type === "message" || !event.type) {
+            const newAlert = {
+                id: event.id,
+                zone: event.zone_name,
+                severity: event.severity,
+                time: new Date().toLocaleTimeString(),
+                camera: event.camera_id,
+                description: event.reason
+            };
+            
+            setEvents(prev => [newAlert, ...prev].slice(0, 50));
+            
+            // Show live intruder blip
+            setLiveIntruder({ zoneId: event.zone_id, text: event.person_name || 'INTRUDER' });
+            setTimeout(() => setLiveIntruder(null), 3000); // clear after 3s
+        }
     };
     
     return () => {
         evtSource.close();
     };
   }, [setCurrentPage]);
+
+  const fetchSuggestions = (videoId: string) => {
+      fetch(`http://localhost:8000/api/virtual-fence/videos/${videoId}/suggested-zones`)
+          .then(res => res.json())
+          .then(data => {
+              if (data.suggestions) setSuggestions(data.suggestions);
+          })
+          .catch(err => console.error(err));
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      
+      setUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      try {
+          const res = await fetch('http://localhost:8000/api/virtual-fence/videos/upload', {
+              method: 'POST',
+              body: formData
+          });
+          const data = await res.json();
+          if (data.status === 'success') {
+              setActiveVideo(data.video);
+          }
+      } catch (err) {
+          console.error(err);
+      } finally {
+          setUploading(false);
+      }
+  };
+
+  const triggerAnalysis = () => {
+      if (!activeVideo) return;
+      setAnalyzing(true);
+      setProgress(0);
+      fetch(`http://localhost:8000/api/virtual-fence/videos/${activeVideo.video_id}/analyze`, { method: 'POST' })
+          .catch(err => { console.error(err); setAnalyzing(false); });
+  };
+
+  const setSource = (source: string) => {
+      fetch('http://localhost:8000/api/virtual-fence/source', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source })
+      });
+      setIsPlaying(true);
+  };
+
+  const handleAcceptSuggestion = (zoneId: string) => {
+      if (!activeVideo) return;
+      fetch(`http://localhost:8000/api/virtual-fence/videos/${activeVideo.video_id}/suggested-zones/${zoneId}/accept`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+      })
+      .then(res => res.json())
+      .then(data => {
+          if (data.status === 'success') {
+              setZones([...zones, data.zone]);
+              setSuggestions(s => s.filter(x => x.id !== zoneId));
+          }
+      });
+  };
+
+  const handleRejectSuggestion = (zoneId: string) => {
+      if (!activeVideo) return;
+      fetch(`http://localhost:8000/api/virtual-fence/videos/${activeVideo.video_id}/suggested-zones/${zoneId}/reject`, { method: 'POST' })
+          .then(() => {
+              setSuggestions(s => s.filter(x => x.id !== zoneId));
+          });
+  };
 
   const toggleZone = (id: string) => {
     fetch(`http://localhost:8000/api/virtual-fence/zones/${id}/toggle`, { method: 'POST' })
@@ -161,6 +263,15 @@ const VirtualFence: React.FC = () => {
         icon={<Shield size={16} />}
         actions={
           <div className="flex items-center gap-2">
+            <input type="file" ref={fileInputRef} className="hidden" accept=".mp4,.avi,.mov,.mkv" onChange={handleFileUpload} />
+            <Btn variant="secondary" size="sm" icon={<Upload size={13} />} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                {uploading ? 'Uploading...' : 'Upload Video'}
+            </Btn>
+            {activeVideo && (
+                <Btn variant={isPlaying ? "primary" : "secondary"} size="sm" icon={<Play size={13} />} onClick={() => setSource(activeVideo.video_id)}>
+                    {isPlaying ? 'Playing Upload' : 'Play Upload'}
+                </Btn>
+            )}
             <Btn variant="primary" size="sm" icon={<Plus size={13} />}>Add Zone</Btn>
           </div>
         }
@@ -169,7 +280,30 @@ const VirtualFence: React.FC = () => {
       <div className="flex flex-1 overflow-hidden">
         {/* Main surveillance preview */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          <FenceSurveillancePreview zones={zones} />
+          
+          {activeVideo && !analyzing && suggestions.length === 0 && (
+             <div className="card p-4 flex justify-between items-center bg-blue-900/20 border-blue-500/30">
+                 <div>
+                     <h4 className="font-semibold text-sm">Video Ready: {activeVideo.filename}</h4>
+                     <p className="text-xs text-gray-400">Run AI analysis to generate zone suggestions.</p>
+                 </div>
+                 <Btn variant="primary" size="sm" onClick={triggerAnalysis}>Analyze Video</Btn>
+             </div>
+          )}
+
+          {analyzing && (
+             <div className="card p-4 flex flex-col gap-2 bg-purple-900/20 border-purple-500/30">
+                 <div className="flex justify-between text-sm font-semibold">
+                     <span className="flex items-center gap-2"><Loader className="animate-spin" size={14}/> AI Analyzing Movement...</span>
+                     <span>{progress}%</span>
+                 </div>
+                 <div className="w-full bg-gray-800 rounded-full h-1.5">
+                    <div className="bg-purple-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+                 </div>
+             </div>
+          )}
+
+          <FenceSurveillancePreview zones={zones} activeVideo={activeVideo} isPlaying={isPlaying} />
 
           {/* Active Intrusion Alerts */}
           <div>
@@ -266,6 +400,34 @@ const VirtualFence: React.FC = () => {
               </div>
             ))}
           </div>
+
+          {/* AI Suggestions */}
+          {suggestions.length > 0 && (
+              <div className="mt-4">
+                  <h3 className="text-xs font-semibold mb-3" style={{ color: 'var(--color-primary)' }}>AI ZONE SUGGESTIONS</h3>
+                  <div className="space-y-3">
+                      {suggestions.map(sugg => (
+                          <div key={sugg.id} className="card p-3 border-dashed border-2" style={{ borderColor: 'var(--color-primary)' }}>
+                              <div className="mb-2">
+                                  <div className="text-xs font-bold text-blue-400 mb-1">{sugg.name}</div>
+                                  <div className="text-xs text-gray-400 mb-2">{sugg.reason}</div>
+                                  <div className="text-[10px] bg-blue-900/50 text-blue-300 px-1.5 py-0.5 rounded inline-block">
+                                      Suggested: {sugg.suggested_type} ({(sugg.confidence * 100).toFixed(0)}%)
+                                  </div>
+                              </div>
+                              <div className="flex gap-1 mt-2">
+                                  <button onClick={() => handleAcceptSuggestion(sugg.id)} className="flex-1 flex items-center justify-center gap-1 py-1 rounded text-xs bg-green-900/30 text-green-400 border border-green-500/30 hover:opacity-80">
+                                      <CheckCircle size={10} /> Accept
+                                  </button>
+                                  <button onClick={() => handleRejectSuggestion(sugg.id)} className="flex-1 flex items-center justify-center gap-1 py-1 rounded text-xs bg-red-900/30 text-red-400 border border-red-500/30 hover:opacity-80">
+                                      <Trash2 size={10} /> Reject
+                                  </button>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          )}
 
           {/* Zone legend */}
           <div className="mt-4 card p-3">

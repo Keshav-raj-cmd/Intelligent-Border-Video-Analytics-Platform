@@ -136,6 +136,36 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vf_videos (
+            video_id TEXT PRIMARY KEY,
+            filename TEXT,
+            file_path TEXT,
+            source_type TEXT DEFAULT 'UPLOADED',
+            duration REAL,
+            fps REAL,
+            width INTEGER,
+            height INTEGER,
+            status TEXT DEFAULT 'UPLOADED',
+            uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            analyzed_at DATETIME
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vf_zone_suggestions (
+            id TEXT PRIMARY KEY,
+            video_id TEXT,
+            name TEXT,
+            suggested_type TEXT,
+            confidence REAL,
+            reason TEXT,
+            boundary TEXT,
+            status TEXT DEFAULT 'PENDING',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     conn.commit()
     conn.close()
     

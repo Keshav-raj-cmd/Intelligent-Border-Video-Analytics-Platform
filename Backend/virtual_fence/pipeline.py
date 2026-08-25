@@ -22,6 +22,14 @@ class VirtualFenceRunner:
         self.model = None
         self.decision_engine = IntrusionDecisionEngine()
         self.face_cache = FaceCache()
+        self.video_source = 0 # Default to webcam
+
+    def set_source(self, source_path):
+        self.video_source = source_path
+        # Restart loop to apply new source
+        if self.running:
+            self.stop()
+            self.start()
 
     def start(self):
         if not self.running:
@@ -42,7 +50,7 @@ class VirtualFenceRunner:
             self.running = True
             self.thread = threading.Thread(target=self._run_loop, daemon=True)
             self.thread.start()
-            print("[INFO] Virtual Fence Runner started.")
+            print(f"[INFO] Virtual Fence Runner started with source: {self.video_source}")
 
     def stop(self):
         self.running = False
@@ -51,7 +59,7 @@ class VirtualFenceRunner:
 
     def _run_loop(self):
         # Fallback to a black frame generation if no camera is available
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(self.video_source)
         has_camera = cap.isOpened()
         
         while self.running:
@@ -136,15 +144,16 @@ class VirtualFenceRunner:
                             log_vf_event(event)
                             
                             # 7. Publish to SSE
-                            event['zone_name'] = zone['name'] # For UI
-                            
-                            # Use a threadsafe asyncio event loop call to publish
-                            try:
-                                loop = asyncio.get_running_loop()
-                                loop.create_task(publisher.publish(event))
-                            except RuntimeError:
-                                # If we can't find the loop (e.g. running outside ASGI), we do our best
-                                pass
+                            if event["event_type"] in ["UNAUTHORIZED_INTRUSION", "UNKNOWN_INTRUSION"]:
+                                event['zone_name'] = zone['name'] # For UI
+                                
+                                # Use a threadsafe asyncio event loop call to publish
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    loop.create_task(publisher.publish(event))
+                                except RuntimeError:
+                                    # If we can't find the loop (e.g. running outside ASGI), we do our best
+                                    pass
                                 
             # Cleanup exits
             # Any track_id that was in active_intrusions but is no longer detected needs an exit transition

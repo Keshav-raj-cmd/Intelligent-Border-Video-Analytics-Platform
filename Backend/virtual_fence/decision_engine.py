@@ -55,11 +55,9 @@ class IntrusionDecisionEngine:
 
         self.active_intrusions[state_key] = current_time
         
-        # We only generate intrusion events for alerts
-        if event["event_type"] in ["UNAUTHORIZED_INTRUSION", "UNKNOWN_INTRUSION"]:
-            return event
-            
-        return None
+        # We return the event so it can be logged, but the caller should decide 
+        # whether to trigger a UI alert based on event_type.
+        return event
 
     def handle_exit(self, zone_id: str, track_id: str):
         state_key = (zone_id, track_id)
