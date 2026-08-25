@@ -40,22 +40,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-gemini_client = None
-if os.getenv("GEMINI_API_KEY"):
-    try:
-        from google import genai
-        from google.genai import types
-        gemini_client = genai.Client()
-    except ImportError:
-        print("google-genai is not installed")
 
 # --- Local Face & ANPR Engine Integration ---
 from database import register_face, get_face_info, get_all_features, get_all_vehicles, register_vehicle, log_anpr_event
 from face_engine import face_engine
 from virtual_fence.routes import router as virtual_fence_router
+from chatbot.chat import router as chat_router
 
 app = FastAPI(title="Thermal Human Detection API")
 app.include_router(virtual_fence_router)
+app.include_router(chat_router, prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,
@@ -114,26 +108,6 @@ class ImageEnhancer:
             return cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
         except Exception:
             return frame
-
-class ChatRequest(BaseModel):
-    message: str
-
-@app.post("/api/chat")
-async def api_chat(req: ChatRequest):
-    if not gemini_client:
-        return JSONResponse(status_code=500, content={"error": "Gemini API key not configured or sdk missing"})
-    
-    try:
-        response = gemini_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=req.message,
-            config=types.GenerateContentConfig(
-                system_instruction="You are the IBVAP AI Assistant. Reply in normal plain text instead of markdown. Do not use any bolding, asterisks, or formatting. Restrict your answers strictly to the defence and surveillance system. Do not answer general knowledge questions outside of this domain. If asked outside this scope, politely decline."
-            )
-        )
-        return {"reply": response.text}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
 
 enhancer = ImageEnhancer()
 
@@ -264,6 +238,7 @@ async def root():
 async def api_face_register(
     subject_name: str = Form(...),
     info_json: str = Form(...),
+    threat_level: int = Form(0),
     file: UploadFile = File(...)
 ):
     try:
@@ -271,7 +246,7 @@ async def api_face_register(
         
         # Save to local SQLite Database (also extracts and saves OpenCV feature vector)
         info_dict = json.loads(info_json)
-        register_face(subject_name, info_dict, contents)
+        register_face(subject_name, info_dict, contents, threat_level)
             
         return JSONResponse(content={"status": "success", "subject": subject_name})
     except Exception as e:

@@ -136,6 +136,7 @@ const HumanFaceDetection: React.FC = () => {
   // Registration Modal State
   const [regName, setRegName] = useState('');
   const [regInfo, setRegInfo] = useState('');
+  const [threatLevel, setThreatLevel] = useState(0);
   const [regFile, setRegFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -191,13 +192,14 @@ const HumanFaceDetection: React.FC = () => {
     const formData = new FormData();
     formData.append('subject_name', regName);
     formData.append('info_json', JSON.stringify({ notes: regInfo }));
+    formData.append('threat_level', threatLevel.toString());
     formData.append('file', regFile);
     try {
       const res = await fetch('http://localhost:8000/api/face/register', { method: 'POST', body: formData });
       if (res.ok) {
         alert(`Successfully registered face for ${regName}`);
         setShowRegisterModal(false);
-        setRegName(''); setRegInfo(''); setRegFile(null);
+        setRegName(''); setRegInfo(''); setThreatLevel(0); setRegFile(null);
       } else {
         const err = await res.json();
         alert(`Error: ${err.error}`);
@@ -278,8 +280,19 @@ const HumanFaceDetection: React.FC = () => {
                   >
                     {activeDetections.map((det, idx) => {
                       const isMatch = !!det.database_info;
-                      const boxColor = isMatch ? '#ef4444' : '#FF9933'; // Red for match, orange for unknown
-                      const fillColor = isMatch ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 153, 51, 0.2)';
+                      
+                      let boxColor = '#FF9933'; // Orange for unknown
+                      let fillColor = 'rgba(255, 153, 51, 0.2)';
+                      
+                      if (isMatch) {
+                          if (det.database_info.category === 'Criminal') {
+                              boxColor = '#ef4444'; // Red for criminal
+                              fillColor = 'rgba(239, 68, 68, 0.2)';
+                          } else {
+                              boxColor = '#10b981'; // Green for normal
+                              fillColor = 'rgba(16, 185, 129, 0.2)';
+                          }
+                      }
                       
                       return (
                         <g key={idx}>
@@ -319,8 +332,10 @@ const HumanFaceDetection: React.FC = () => {
                   No registered faces currently in frame.
                 </div>
               ) : (
-                activeDetections.filter(d => d.database_info).map((det, i) => (
-                  <div key={i} className="p-3 rounded-lg border border-red-500/30 flex flex-col gap-3"
+                activeDetections.filter(d => d.database_info).map((det, i) => {
+                  const isCriminal = det.database_info.category === 'Criminal';
+                  return (
+                  <div key={i} className={`p-3 rounded-lg border flex flex-col gap-3 ${isCriminal ? 'border-red-500/30' : 'border-green-500/30'}`}
                     style={{ background: 'var(--color-bg-elevated)' }}>
                     <div className="flex gap-3">
                         <img 
@@ -329,11 +344,16 @@ const HumanFaceDetection: React.FC = () => {
                             className="w-16 h-16 object-cover rounded border border-border"
                         />
                         <div>
-                            <div className="text-red-500 font-bold text-sm uppercase">{det.class}</div>
+                            <div className={`${isCriminal ? 'text-red-500' : 'text-green-500'} font-bold text-sm uppercase`}>{det.class}</div>
                             <div className="text-xs text-muted mb-1">Match: {(det.confidence * 100).toFixed(1)}%</div>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-500 font-mono border border-red-500/20">
-                                RECORD HIT
-                            </span>
+                            <div className="flex gap-1">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono border ${isCriminal ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-green-500/10 text-green-500 border-green-500/20'}`}>
+                                    {isCriminal ? 'CRIMINAL' : 'NORMAL'}
+                                </span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 font-mono border border-blue-500/20">
+                                    THREAT: {det.database_info.threat_level}
+                                </span>
+                            </div>
                         </div>
                     </div>
                     {det.database_info.additional_info?.notes && (
@@ -342,7 +362,7 @@ const HumanFaceDetection: React.FC = () => {
                         </div>
                     )}
                   </div>
-                ))
+                )})
               )}
             </div>
         </div>
@@ -364,6 +384,22 @@ const HumanFaceDetection: React.FC = () => {
                     <div>
                         <label className="block text-xs font-bold text-muted mb-1">ADDITIONAL INFO</label>
                         <textarea required value={regInfo} onChange={e => setRegInfo(e.target.value)} className="w-full bg-black/50 border border-border rounded px-3 py-2 text-sm text-white h-24" placeholder="Notes..." />
+                    </div>
+                    <div>
+                        <div className="flex justify-between items-end mb-1">
+                            <label className="block text-xs font-bold text-muted">THREAT LEVEL (0-100)</label>
+                            <span className={`text-xs font-bold ${threatLevel >= 50 ? 'text-red-500' : 'text-green-500'}`}>
+                                {threatLevel >= 50 ? 'CRIMINAL' : 'NORMAL'} ({threatLevel})
+                            </span>
+                        </div>
+                        <input 
+                            type="range" 
+                            min="0" 
+                            max="100" 
+                            value={threatLevel} 
+                            onChange={e => setThreatLevel(parseInt(e.target.value))} 
+                            className="w-full"
+                        />
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-muted mb-1">MUGSHOT PHOTO</label>

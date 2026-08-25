@@ -22,7 +22,9 @@ def init_db():
             subject_name TEXT PRIMARY KEY,
             additional_info TEXT,
             photo_base64 TEXT,
-            feature_vector BLOB
+            feature_vector BLOB,
+            threat_level INTEGER DEFAULT 0,
+            category TEXT DEFAULT 'Normal'
         )
     ''')
     
@@ -164,6 +166,15 @@ def migrate_tables():
     try:
         cursor.execute("ALTER TABLE registered_vehicles ADD COLUMN notes TEXT")
     except: pass
+    
+    # Add threat_level and category to known_faces
+    try:
+        cursor.execute("ALTER TABLE known_faces ADD COLUMN threat_level INTEGER DEFAULT 0")
+    except: pass
+    try:
+        cursor.execute("ALTER TABLE known_faces ADD COLUMN category TEXT DEFAULT 'Normal'")
+    except: pass
+    
     conn.commit()
     conn.close()
 
@@ -254,7 +265,7 @@ def seed_virtual_fence():
     conn.commit()
     conn.close()
 
-def register_face(subject_name: str, additional_info: dict, photo_bytes: bytes):
+def register_face(subject_name: str, additional_info: dict, photo_bytes: bytes, threat_level: int = 0):
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -270,15 +281,19 @@ def register_face(subject_name: str, additional_info: dict, photo_bytes: bytes):
     info_json = json.dumps(additional_info)
     photo_base64 = base64.b64encode(photo_bytes).decode('utf-8')
     
+    category = "Criminal" if threat_level >= 50 else "Normal"
+    
     try:
         cursor.execute('''
-            INSERT INTO known_faces (subject_name, additional_info, photo_base64, feature_vector)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO known_faces (subject_name, additional_info, photo_base64, feature_vector, threat_level, category)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(subject_name) DO UPDATE SET
             additional_info=excluded.additional_info,
             photo_base64=excluded.photo_base64,
-            feature_vector=excluded.feature_vector
-        ''', (subject_name, info_json, photo_base64, feature_bytes))
+            feature_vector=excluded.feature_vector,
+            threat_level=excluded.threat_level,
+            category=excluded.category
+        ''', (subject_name, info_json, photo_base64, feature_bytes, threat_level, category))
         conn.commit()
     except Exception as e:
         print(f"DB Error: {e}")
@@ -289,11 +304,17 @@ def get_face_info(subject_name: str):
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT additional_info, photo_base64 FROM known_faces WHERE subject_name = ?', (subject_name,))
+    cursor.execute('SELECT additional_info, photo_base64, threat_level, category FROM known_faces WHERE subject_name = ?', (subject_name,))
     row = cursor.fetchone()
     conn.close()
     if row:
-        return {"subject_name": subject_name, "additional_info": json.loads(row[0]), "photo_base64": row[1]}
+        return {
+            "subject_name": subject_name, 
+            "additional_info": json.loads(row[0]), 
+            "photo_base64": row[1],
+            "threat_level": row[2] if len(row) > 2 else 0,
+            "category": row[3] if len(row) > 3 else "Normal"
+        }
     return None
 
 def get_all_features():
