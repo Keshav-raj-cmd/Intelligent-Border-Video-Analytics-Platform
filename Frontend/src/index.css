@@ -1,0 +1,344 @@
+@import "tailwindcss";
+
+@theme {
+  /* Indian Army Tactical Theme */
+  --color-bg-base: #090e09; /* Deep Olive Drab */
+  --color-bg-surface: #101610; 
+  --color-bg-elevated: #182218;
+  --color-bg-card: #141c14;
+  --color-bg-hover: #1d2b1d;
+
+  --color-border: #243324;
+  --color-border-light: #324732;
+
+  --color-primary: #C3B091; /* Tactical Khaki / Desert */
+  --color-primary-dark: #A89574;
+  --color-primary-light: #DCD0B6;
+
+  --color-success: #138808; /* Indian Flag Green */
+  --color-success-dark: #0f6c06;
+  --color-success-bg: #031c01;
+
+  --color-warning: #FF9933; /* Indian Flag Saffron */
+  --color-warning-dark: #cc7a29;
+  --color-warning-bg: #331f0a;
+
+  --color-danger: #ef4444; /* Standard Tactical Red */
+  --color-danger-dark: #dc2626;
+  --color-danger-bg: #2d0707;
+
+  --color-critical: #ff2020;
+  --color-critical-bg: #3d0000;
+
+  --color-info: #64748b;
+  --color-info-bg: #0f172a;
+
+  --color-text-primary: #e2e8f0;
+  --color-text-secondary: #9da39b; /* Slightly greenish grey */
+  --color-text-muted: #6b7569;
+  --color-text-disabled: #4a5448;
+
+  --color-accent-cyan: #FF9933; /* Saffron Accent */
+  --color-accent-purple: #C3B091; /* Khaki Accent */
+  --color-accent-orange: #FF9933;
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-light);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+/* Custom utility classes */
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.card-elevated {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot-lg {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.pulse-ring {
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.live-indicator::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+  margin-right: 4px;
+  animation: live-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes live-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+.camera-feed {
+  background: linear-gradient(135deg, #0a0f1e 0%, #0d1627 50%, #060c18 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.camera-feed::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+}
+
+.camera-feed-night {
+  background: linear-gradient(135deg, #0a1208 0%, #0d1a0a 50%, #060e04 100%);
+}
+
+.camera-feed-thermal {
+  background: linear-gradient(135deg, #1a0505 0%, #2d0a0a 50%, #120303 100%);
+}
+
+.detection-box {
+  border: 2px solid;
+  border-radius: 2px;
+  position: absolute;
+  animation: detection-appear 0.3s ease-out;
+}
+
+@keyframes detection-appear {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.network-node {
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.network-node:hover {
+  transform: scale(1.1);
+}
+
+.fade-in {
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.slide-in-right {
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.glow-danger {
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+}
+
+.glow-warning {
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.3);
+}
+
+.glow-success {
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+}
+
+.glow-primary {
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+}
+
+.text-mono {
+  font-family: var(--font-mono);
+}
+
+.border-l-critical {
+  border-left: 3px solid var(--color-critical);
+}
+
+.border-l-danger {
+  border-left: 3px solid var(--color-danger);
+}
+
+.border-l-warning {
+  border-left: 3px solid var(--color-warning);
+}
+
+.border-l-success {
+  border-left: 3px solid var(--color-success);
+}
+
+.border-l-primary {
+  border-left: 3px solid var(--color-primary);
+}
+
+.border-l-info {
+  border-left: 3px solid var(--color-info);
+}
+
+/* AI typing animation */
+.typing-dots span {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  margin: 0 2px;
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-8px); }
+}
+
+/* Kanban */
+.kanban-column {
+  min-height: 200px;
+}
+
+/* Table rows */
+.table-row-hover:hover {
+  background: var(--color-bg-hover);
+}
+
+/* Progress bars */
+.progress-bar {
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Virtual fence visualization */
+.fence-zone {
+  border: 2px dashed;
+  border-radius: 4px;
+  position: absolute;
+}
+
+/* Grid scan line effect */
+.scan-line {
+  position: absolute;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.4), transparent);
+  animation: scan 3s linear infinite;
+}
+
+@keyframes scan {
+  0% { top: 0%; }
+  100% { top: 100%; }
+}
+
+/* Thermal heat map gradient */
+.thermal-gradient {
+  background: linear-gradient(135deg, 
+    #000080 0%, 
+    #0000ff 15%, 
+    #00ffff 30%, 
+    #00ff00 45%, 
+    #ffff00 60%, 
+    #ff8000 75%, 
+    #ff0000 90%, 
+    #ffffff 100%
+  );
+}
+
+/* Recharts custom */
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+
+.recharts-default-tooltip {
+  background: var(--color-bg-elevated) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 6px !important;
+  color: var(--color-text-primary) !important;
+}

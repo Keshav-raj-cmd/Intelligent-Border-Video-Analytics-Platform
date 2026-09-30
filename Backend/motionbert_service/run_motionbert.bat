@@ -1,0 +1,6 @@
+@echo off
+echo Activating MotionBERT Conda Environment...
+call C:\Users\keshu\anaconda3\Scripts\activate.bat motionbert
+
+echo Starting MotionBERT Microservice API...
+python app.py
